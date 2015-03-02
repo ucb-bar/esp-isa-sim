@@ -7,7 +7,7 @@ if (VL) {
 
 vf_loop:
 
-  if (VF_PC & 3)
+  if (VF_PC & 7)
     h->take_exception(HWACHA_CAUSE_VF_MISALIGNED_FETCH, VF_PC);
 
   insn_t ut_insn = p->get_mmu()->load_insn(VF_PC).insn;
@@ -23,8 +23,10 @@ vf_loop:
   #include "opcodes_hwacha_ut.h"
   #undef DECLARE_INSN
 
-  if (!matched)
+  if (!matched){
+    printf("unmatched vf instr\n");
     h->take_exception(HWACHA_CAUSE_VF_ILLEGAL_INSTRUCTION, VF_PC);
+  }
 
   if (!h->get_debug()) {
     if (h->vf_active())

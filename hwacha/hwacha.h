@@ -3,18 +3,23 @@
 
 #include "extension.h"
 
+static const uint32_t MAX_SPR = 256;
+static const uint32_t MAX_APR = 32;
+
 struct ct_state_t
 {
   void reset();
 
   uint32_t nxpr;
-  uint32_t nfpr;
+  uint32_t nppr;
   uint32_t maxvl;
   uint32_t vl;
   uint32_t count;
   uint32_t prec;
 
   reg_t vf_pc;
+  regfile_t<reg_t, 256, true> SPR;
+  regfile_t<reg_t, 32, true> APR;
 };
 
 struct ut_state_t
@@ -22,8 +27,8 @@ struct ut_state_t
   void reset();
 
   bool run;
-  regfile_t<reg_t, 32, true> XPR;
-  regfile_t<reg_t, 32, false> FPR;
+  regfile_t<reg_t, 256, true> XPR;
+  regfile_t<bool, 16, false> PPR;
 };
 
 class hwacha_t : public extension_t

@@ -53,6 +53,7 @@ public:
   insn_bits_t bits() { return b; }
   int64_t i_imm() { return int64_t(b) >> 20; }
   int64_t s_imm() { return x(7, 5) + (xs(25, 7) << 5); }
+
   int64_t sb_imm() { return (x(8, 4) << 1) + (x(25,6) << 5) + (x(7,1) << 11) + (imm_sign() << 12); }
   int64_t u_imm() { return int64_t(b) >> 12 << 12; }
   int64_t uj_imm() { return (x(21, 10) << 1) + (x(20, 1) << 11) + (x(12, 8) << 12) + (imm_sign() << 20); }
@@ -60,6 +61,47 @@ public:
   uint64_t rs1() { return x(15, 5); }
   uint64_t rs2() { return x(20, 5); }
   uint64_t rs3() { return x(27, 5); }
+  int64_t v_imm() { return int64_t(b) >> 32; }
+  int64_t vc_imm() { return int64_t(b) >> 35 << 3; }
+  uint64_t svsrd() { return (x(22,20)<<5) | (x(11, 7)); }
+  uint64_t svard() { return rd(); }
+  uint64_t vrd() { return x(16, 8); }
+  uint64_t vrs1() { return x(24, 8); }
+  uint64_t vrs2() { return x(33, 8); }
+  uint64_t vrs3() { return x(41, 8); }
+  uint64_t vprd() { return x(16, 4); }
+  uint64_t vprs1() { return x(24, 4); }
+  uint64_t vprs2() { return x(33, 4); }
+  uint64_t vprs3() { return x(41, 4); }
+  uint64_t vars1() { return x(24, 5); }
+  uint64_t vars2() { return x(33, 5); }
+  uint64_t vseg() { return x(50, 3); }
+  uint64_t vpred() { return x(12, 4); }
+  uint64_t vn() { return x(32, 1); }
+  uint64_t vcond() { return x(33, 2); }
+  uint64_t vd() { return x(63, 1); }
+  uint64_t vs1() { return x(62, 1); }
+  uint64_t vs2() { return x(61, 1); }
+  uint64_t vs3() { return x(60, 1); }
+  uint64_t vpop_table() { return x(50, 8); }
+  uint64_t vshamt() { return x(32, 6); }
+  uint64_t vopc() { return x(7, 5); }
+  bool v_is_scalar(){
+    bool scalar_opc = 
+      vopc() == 0x04 || //scalar imm arith
+      vopc() == 0x05 || //auipc
+      vopc() == 0x06 || //scalar-32 imm arith
+      vopc() == 0x0D || //lui
+      vopc() == 0x18 || //fence/stop
+      vopc() == 0x19 || //jalr
+      vopc() == 0x1B;   //jal
+
+    //includes scalar loads and reg-reg ops with scalar dest
+    bool dyn_scalar_op =
+      !scalar_opc && vd() == 0;
+
+    return scalar_opc || dyn_scalar_op;
+  }
   uint64_t rm() { return x(12, 3); }
   uint64_t csr() { return x(20, 12); }
 private:
