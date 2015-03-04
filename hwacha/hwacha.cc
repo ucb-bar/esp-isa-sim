@@ -15,6 +15,8 @@ void ct_state_t::reset()
   count = 0;
   prec = 64;
 
+  enable = false;
+
   vf_pc = -1;
 
   SPR.reset();

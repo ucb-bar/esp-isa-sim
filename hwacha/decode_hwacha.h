@@ -16,6 +16,8 @@
 #define VL (h->get_ct_state()->vl)
 #define UTIDX (h->get_ct_state()->count)
 #define VF_PC (h->get_ct_state()->vf_pc)
+#define ENABLED (h->get_ct_state()->enable)
+#define WRITE_ENABLE(en) (h->get_ct_state()->enable = en)
 #define WRITE_NXPR(nxprnext) (h->get_ct_state()->nxpr = (nxprnext))
 #define WRITE_NPPR(npprnext) (h->get_ct_state()->nppr = (npprnext))
 #define WRITE_MAXVL(maxvlnext) (h->get_ct_state()->maxvl = (maxvlnext))

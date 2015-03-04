@@ -17,6 +17,8 @@ struct ct_state_t
   uint32_t count;
   uint32_t prec;
 
+  bool enable;
+
   reg_t vf_pc;
   regfile_t<reg_t, 256, true> SPR;
   regfile_t<reg_t, 32, true> APR;

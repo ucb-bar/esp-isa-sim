@@ -1,3 +1,6 @@
+if(!ENABLED) 
+  h->take_exception(HWACHA_CAUSE_ILLEGAL_INSTRUCTION, VF_PC);
+
 if (VL) {
   if (!h->vf_active()) {
     WRITE_VF_PC(XS1 + insn.s_imm());

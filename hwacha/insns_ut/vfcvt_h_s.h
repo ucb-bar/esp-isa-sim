@@ -1,3 +1,3 @@
 require_fp;
-WRITE_FRD(cvt_sh(FRS1, RM));
+WRITE_HFRD(FRS1);
 set_fp_exceptions;
