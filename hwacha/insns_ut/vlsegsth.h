@@ -1,0 +1,1 @@
+VEC_SEG_ST_LOAD(XPR, load_int16, ARS2, 2);

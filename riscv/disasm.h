@@ -21,7 +21,7 @@ class arg_t
 class disasm_insn_t
 {
  public:
-  disasm_insn_t(const char* name, uint32_t match, uint32_t mask,
+  disasm_insn_t(const char* name, uint64_t match, uint64_t mask,
                 const std::vector<const arg_t*>& args)
     : match(match), mask(mask), args(args), name(name) {}
 

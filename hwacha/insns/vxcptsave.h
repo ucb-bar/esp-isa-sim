@@ -1,3 +1,6 @@
+if(!ENABLED) 
+  h->take_exception(HWACHA_CAUSE_ILLEGAL_INSTRUCTION, VF_PC);
+
 require_supervisor_hwacha;
 reg_t addr = XS1;
 
@@ -13,23 +16,33 @@ reg_t addr = XS1;
   p->get_mmu()->store_uint64(addr, value); \
   addr += 8; \
 
+//Control Thread State
 STORE_W(addr, NXPR);
-STORE_W(addr, NFPR);
+STORE_W(addr, NPPR);
 STORE_W(addr, MAXVL);
 STORE_W(addr, VL);
 STORE_W(addr, UTIDX);
 addr += 4;
 STORE_D(addr, VF_PC);
 
-for (uint32_t x=1; x<NXPR; x++) {
+for (uint32_t s=0; s<MAX_SPR; s++){
+  STORE_D(addr, READ_SPR(s));
+}
+
+for (uint32_t a=0; a<MAX_APR; a++){
+  STORE_D(addr, READ_APR(a));
+}
+
+//Worker Thread State
+for (uint32_t x=0; x<NXPR; x++) {
   for (uint32_t i=0; i<VL; i++) {
     STORE_D(addr, UT_READ_XPR(i, x));
   }
 }
 
-for (uint32_t f=0; f<NFPR; f++) {
+for (uint32_t pred=0; pred<NPPR; pred++) {
   for (uint32_t i=0; i<VL; i++) {
-    STORE_D(addr, UT_READ_FPR(i, f));
+    STORE_D(addr, UT_READ_PPR(i, pred));
   }
 }
 

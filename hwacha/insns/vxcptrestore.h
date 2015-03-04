@@ -1,3 +1,6 @@
+if(!ENABLED) 
+  h->take_exception(HWACHA_CAUSE_ILLEGAL_INSTRUCTION, VF_PC);
+
 require_supervisor_hwacha;
 reg_t addr = XS1;
 
@@ -11,23 +14,33 @@ reg_t addr = XS1;
   (addr += 8, p->get_mmu()->load_uint64(addr-8))
 
 
+//Control Thread State
 WRITE_NXPR(LOAD_W(addr));
-WRITE_NFPR(LOAD_W(addr));
+WRITE_NPPR(LOAD_W(addr));
 WRITE_MAXVL(LOAD_W(addr));
 WRITE_VL(LOAD_W(addr));
 WRITE_UTIDX(LOAD_W(addr));
 addr += 4;
 WRITE_VF_PC(LOAD_D(addr));
 
+for (uint32_t s=0; s<MAX_SPR; s++){
+  WRITE_SPR(s, LOAD_D(addr));
+}
+
+for (uint32_t a=0; a<MAX_APR; a++){
+  WRITE_APR(a, LOAD_D(addr));
+}
+
+//Worker Thread State
 for (uint32_t x=1; x<NXPR; x++) {
   for (uint32_t i=0; i<VL; i++) {
     UT_WRITE_XPR(i, x, LOAD_D(addr));
   }
 }
 
-for (uint32_t f=0; f<NFPR; f++) {
+for (uint32_t f=0; f<NPPR; f++) {
   for (uint32_t i=0; i<VL; i++) {
-    UT_WRITE_FPR(i, f, LOAD_D(addr));
+    UT_WRITE_PPR(i, f, LOAD_D(addr));
   }
 }
 
