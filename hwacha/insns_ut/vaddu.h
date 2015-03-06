@@ -1,1 +1,1 @@
-WRITE_RD(zext_xprlen(RS1 + RS2));
+WRITE_RD(zext_xlen(RS1 + RS2));

@@ -1,1 +1,1 @@
-WRITE_SRD(sext_xprlen(insn.v_imm() + VF_PC));
+WRITE_SRD(sext_xlen(insn.v_imm() + VF_PC));

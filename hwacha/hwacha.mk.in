@@ -43,3 +43,5 @@ $(hwacha_ut_gen_srcs): %.cc: insns_ut/%.h insn_template_hwacha_ut.cc
 hwacha_junk = \
 	$(hwacha_gen_srcs) \
 	$(hwacha_ut_gen_srcs) \
+	insn_template_hwacha.h.gch \
+	insn_template_hwacha_ut.h.gch \

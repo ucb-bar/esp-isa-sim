@@ -146,7 +146,7 @@ static inline void write_ppr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst,
 {
   if (dst >= h->get_ct_state()->nppr)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
-  if(VPRED || pred)
+  if(pred || VPRED)
     h->get_ut_state(idx)->PPR.write(dst, value);
 }
 

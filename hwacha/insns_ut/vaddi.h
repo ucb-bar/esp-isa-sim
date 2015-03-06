@@ -1,1 +1,1 @@
-WRITE_SRD(sext_xprlen(SRS1 + insn.v_imm()));
+WRITE_SRD(sext_xlen(SRS1 + insn.v_imm()));
