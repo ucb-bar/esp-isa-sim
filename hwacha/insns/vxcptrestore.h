@@ -1,5 +1,5 @@
-if(!ENABLED) 
-  h->take_exception(HWACHA_CAUSE_ILLEGAL_INSTRUCTION, VF_PC);
+if(ENABLED) 
+{
 
 require_supervisor_hwacha;
 reg_t addr = XS1;
@@ -51,3 +51,4 @@ for (uint32_t i=0; i<VL; i++) {
 #undef LOAD_B
 #undef LOAD_W
 #undef LOAD_D
+}

@@ -1,5 +1,5 @@
-if(!ENABLED) 
-  h->take_exception(HWACHA_CAUSE_ILLEGAL_INSTRUCTION, VF_PC);
+if(ENABLED) 
+{
 
 require_supervisor_hwacha;
 reg_t addr = XS1;
@@ -55,3 +55,4 @@ for (uint32_t i=0; i<VL; i++) {
 #undef STORE_D
 
 #include "insns/vxcptkill.h"
+}
