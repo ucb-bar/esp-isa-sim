@@ -43,7 +43,7 @@
 #define INSN_VS1   (insn.vs1())
 #define INSN_VS2   (insn.vs2())
 #define INSN_VS3   (insn.vs3())
-#define INSN_SVSRD (insns.svsrd())
+#define INSN_SVSRD (insn.svsrd())
 
 static inline reg_t read_spr(hwacha_t* h, insn_t insn, size_t src)
 {
@@ -65,7 +65,7 @@ static inline void write_spr(hwacha_t* h, insn_t insn, size_t dst, reg_t value)
 #define SRS2 (READ_SPR(INSN_VRS2))
 #define SRS3 (READ_SPR(INSN_VRS3))
 #define WRITE_SRD(value) (WRITE_SPR(INSN_VRD, value))
-#define WRITE_SVSRD(value) (WRITE_SPR(INSN_VRD, value))
+#define WRITE_SVSRD(value) (WRITE_SPR(INSN_SVSRD, value))
 
 //Address regs
 #define INSN_VARS1 (insn.vars1())
@@ -172,8 +172,9 @@ static inline void write_xpr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst,
 {
   if (dst >= h->get_ct_state()->nxpr)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
-  if(VPRED)
+  if(VPRED){
     h->get_ut_state(idx)->XPR.write(dst, value);
+  }
 }
 
 #define UT_READ_XPR(idx, src) read_xpr(h, insn, idx, src)
