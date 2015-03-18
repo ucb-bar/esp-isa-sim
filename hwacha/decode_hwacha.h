@@ -15,6 +15,7 @@
 #define MAXVL (h->get_ct_state()->maxvl)
 #define VL (h->get_ct_state()->vl)
 #define UTIDX (h->get_ct_state()->count)
+#define PREC (h->get_ct_state()->prec)
 #define VF_PC (h->get_ct_state()->vf_pc)
 #define ENABLED (h->get_ct_state()->enable)
 #define WRITE_ENABLE(en) (h->get_ct_state()->enable = en)
@@ -186,7 +187,7 @@ static inline void write_xpr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst,
 
 
 #define require_supervisor_hwacha \
-  if (unlikely(!(p->get_state()->sr & SR_S))) \
-    h->take_exception(HWACHA_CAUSE_PRIVILEGED_INSTRUCTION, uint64_t(insn.bits()));
+  if (get_field(p->get_state()->mstatus, MSTATUS_PRV) < PRV_S) \
+    h->take_exception(HWACHA_CAUSE_PRIVILEGED_INSTRUCTION, uint32_t(insn.bits()));
 
 #endif

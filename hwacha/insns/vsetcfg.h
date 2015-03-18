@@ -1,5 +1,5 @@
 uint32_t nxpr = (XS1 & 0x3f) + (insn.i_imm() & 0x3f);
-uint32_t nppr = ((XS1 >> 8) & 0xf) + ((insn.i_imm() >> 8) & 0xf);
+uint32_t nppr = ((XS1 >> 8) & 0xf) + ((insn.i_imm() >> 8) & 0xf) + 1;
 if (nxpr > 256)
   h->take_exception(HWACHA_CAUSE_ILLEGAL_CFG, 0);
 if (nppr > 16)

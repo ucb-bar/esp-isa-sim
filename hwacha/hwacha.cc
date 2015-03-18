@@ -8,6 +8,7 @@ REGISTER_EXTENSION(hwacha, []() { return new hwacha_t; })
 
 void ct_state_t::reset()
 {
+  memset(this, 0, sizeof(*this));
   nxpr = 128;
   nppr = 8;
   maxvl = 32;
@@ -19,15 +20,12 @@ void ct_state_t::reset()
 
   vf_pc = -1;
 
-  SPR.reset();
-  APR.reset();
 }
 
 void ut_state_t::reset()
 {
+  memset(this, 0, sizeof(*this));
   run = false;
-  XPR.reset();
-  PPR.reset();
 }
 
 void hwacha_t::reset()
@@ -137,7 +135,5 @@ if(cause == HWACHA_CAUSE_FAULT_STORE)
   
 
   raise_interrupt();
-  if (!(p->get_state()->sr & SR_EI))
-    throw std::logic_error("hwacha exception posted, but SR_EI bit not set!");
-  throw std::logic_error("hwacha exception posted, but IM[COP] bit not set!");
+  throw std::logic_error("unreachable!");
 }

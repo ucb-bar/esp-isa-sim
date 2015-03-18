@@ -209,8 +209,8 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
 
   DISASM_INSN("vxcptcause", vxcptcause, 0, {&xrd});
   DISASM_INSN("vxcptaux", vxcptaux, 0, {&xrd});
-  DISASM_INSN("vxcptsave", vxcptsave, 0, {&xrs1});
-  DISASM_INSN("vxcptrestore", vxcptrestore, 0, {&xrs1});
+  DISASM_INSN("vxcptevac", vxcptevac, 0, {&xrs1});
+  DISASM_INSN("vxcpthold", vxcpthold, 0, {&xrs1});
   DISASM_INSN("vxcptkill", vxcptkill, 0, {});
 
   #define DECLARE_INSN(code, match, mask) \

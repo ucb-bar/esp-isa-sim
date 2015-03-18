@@ -1,4 +1,4 @@
-if(xpr64)
+if(xlen == 64)
   WRITE_SRD(sreg_t(SRS1) >> VSHAMT);
 else
 {
