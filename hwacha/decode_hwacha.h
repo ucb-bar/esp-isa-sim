@@ -26,6 +26,7 @@
 #define WRITE_UTIDX(value) (h->get_ct_state()->count = (value))
 #define WRITE_VF_PC(pcnext) (h->get_ct_state()->vf_pc = (pcnext))
 #define WRITE_PREC(precision) (h->get_ct_state()->prec = (precision))
+#define WRITE_VRM(rm) (h->get_ct_state()->frm = (rm))
 
 #define VRM ({ int rm = insn.vrm(); \
               if(rm == 7) rm = h->get_ct_state()->frm; \
@@ -169,17 +170,18 @@ static inline reg_t read_xpr(hwacha_t* h, insn_t insn, uint32_t idx, size_t src)
   return (h->get_ut_state(idx)->XPR[src]);
 }
 
-static inline void write_xpr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst, reg_t value)
+static inline void write_xpr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst, reg_t value, bool pred)
 {
   if (dst >= h->get_ct_state()->nxpr)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
-  if(VPRED){
+  if(pred || VPRED){
     h->get_ut_state(idx)->XPR.write(dst, value);
   }
 }
 
 #define UT_READ_XPR(idx, src) read_xpr(h, insn, idx, src)
-#define UT_WRITE_XPR(idx, dst, value) write_xpr(h, insn, idx, dst, value)
+#define UT_WRITE_XPR(idx, dst, value) write_xpr(h, insn, idx, dst, value, 0)
+#define UT_WRITE_XPR_NO_PRED(idx, dst, value) write_xpr(h, insn, idx, dst, value, 1)
 #define UT_VRS1(idx) (UT_READ_XPR(idx, INSN_VRS1))
 #define UT_VRS2(idx) (UT_READ_XPR(idx, INSN_VRS2))
 #define UT_VRS3(idx) (UT_READ_XPR(idx, INSN_VRS3))

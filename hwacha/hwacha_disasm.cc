@@ -1,17 +1,17 @@
 #include "hwacha.h"
 
 static const char* xpr[] = {
-  "zero", "ra", "s0", "s1",  "s2",  "s3",  "s4",  "s5",
-  "s6",   "s7", "s8", "s9", "s10", "s11",  "sp",  "tp",
-  "v0",   "v1", "a0", "a1",  "a2",  "a3",  "a4",  "a5",
-  "a6",   "a7", "t0", "t1",  "t2",  "t3",  "t4",  "gp"
+  "zero", "ra", "sp",  "gp",  "tp", "t0",  "t1",  "t2",
+  "s0",   "s1", "a0",  "a1",  "a2", "a3",  "a4",  "a5",
+  "a6",   "a7", "s2",  "s3",  "s4", "s5",  "s6",  "s7",
+  "s8",   "s9", "s10", "s11", "t3", "t4",  "t5",  "t6"
 };
 
 static const char* fpr[] = {
-  "fs0", "fs1",  "fs2",  "fs3",  "fs4",  "fs5",  "fs6",  "fs7",
-  "fs8", "fs9", "fs10", "fs11", "fs12", "fs13", "fs14", "fs15",
-  "fv0", "fv1", "fa0",   "fa1",  "fa2",  "fa3",  "fa4",  "fa5",
-  "fa6", "fa7", "ft0",   "ft1",  "ft2",  "ft3",  "ft4",  "ft5"
+  "ft0", "ft1", "ft2",  "ft3",  "ft4", "ft5", "ft6",  "ft7",
+  "fs0", "fs1", "fa0",  "fa1",  "fa2", "fa3", "fa4",  "fa5",
+  "fa6", "fa7", "fs2",  "fs3",  "fs4", "fs5", "fs6",  "fs7",
+  "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"
 };
 
 static const char* vxpr[] = {
@@ -181,6 +181,12 @@ struct : public arg_t {
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
+    return std::to_string((insn.i_imm()>>8) & 0xf);
+  }
+} npregs;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
     return std::to_string((int)insn.s_imm()) + '(' + xpr[insn.rs1()] + ')';
   }
 } vf_addr;
@@ -198,7 +204,7 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
   #define DISASM_INSN(name, code, extra, ...) \
     insns.push_back(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__));
 
-  DISASM_INSN("vsetcfg", vsetcfg, 0, {&xrs1, &nxregs});
+  DISASM_INSN("vsetcfg", vsetcfg, 0, {&npregs, &nxregs});
   DISASM_INSN("vsetvl", vsetvl, 0, {&xrd, &xrs1});
   DISASM_INSN("vgetcfg", vgetcfg, 0, {&xrd});
   DISASM_INSN("vgetvl", vgetvl, 0, {&xrd});

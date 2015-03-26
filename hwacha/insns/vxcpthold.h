@@ -34,15 +34,15 @@ for (uint32_t a=0; a<MAX_APR; a++){
 }
 
 //Worker Thread State
-for (uint32_t x=1; x<NXPR; x++) {
+for (uint32_t x=0; x<NXPR; x++) {
   for (uint32_t i=0; i<VL; i++) {
-    UT_WRITE_XPR(i, x, LOAD_D(addr));
+    UT_WRITE_XPR_NO_PRED(i, x, LOAD_D(addr));
   }
 }
 
 for (uint32_t f=0; f<NPPR; f++) {
   for (uint32_t i=0; i<VL; i++) {
-    UT_WRITE_PPR(i, f, LOAD_D(addr));
+    WRITE_PPR_NO_PRED(i, f, LOAD_B(addr));
   }
 }
 

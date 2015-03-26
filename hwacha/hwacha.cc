@@ -8,18 +8,22 @@ REGISTER_EXTENSION(hwacha, []() { return new hwacha_t; })
 
 void ct_state_t::reset()
 {
-  memset(this, 0, sizeof(*this));
   nxpr = 128;
   nppr = 8;
   maxvl = 32;
   vl = 0;
   count = 0;
   prec = 64;
+  
+  //inherited from control processor
+  uint32_t fflags; //accumulated and or'd into control threads on reading
+  uint32_t frm; //only readable by work-thread
 
   enable = false;
 
   vf_pc = -1;
-
+  memset(&SPR, 0, sizeof(SPR));
+  memset(&APR, 0, sizeof(APR));
 }
 
 void ut_state_t::reset()

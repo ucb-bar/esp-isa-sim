@@ -10,7 +10,7 @@ uint32_t maxvl;
 if (nxpr < 2)
   maxvl = 8 * 256;
 else
-  maxvl = 8 * (256 / (nxpr-1));
+  maxvl = 8 * (256 / nxpr);
 WRITE_MAXVL(maxvl);
 for(uint32_t i=0; i<maxvl; i++)
   WRITE_PPR_NO_PRED(i,0,1);

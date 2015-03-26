@@ -26,7 +26,6 @@ STORE_W(addr, MAXVL);
 STORE_W(addr, VL);
 STORE_W(addr, UTIDX);
 STORE_W(addr, PREC);
-
 STORE_D(addr, VF_PC);
 
 for (uint32_t s=0; s<MAX_SPR; s++){
@@ -46,13 +45,14 @@ for (uint32_t x=0; x<NXPR; x++) {
 
 for (uint32_t pred=0; pred<NPPR; pred++) {
   for (uint32_t i=0; i<VL; i++) {
-    STORE_D(addr, UT_READ_PPR(i, pred));
+    STORE_B(addr, UT_READ_PPR(i, pred));
   }
 }
 
 for (uint32_t i=0; i<VL; i++) {
   STORE_B(addr, h->get_ut_state(i)->run);
 }
+
 
 #undef STORE_B
 #undef STORE_W
