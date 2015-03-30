@@ -196,9 +196,17 @@ private:
 #define sext_xlen(x) (((sreg_t)(x) << (64-xlen)) >> (64-xlen))
 #define zext_xlen(x) (((reg_t)(x) << (64-xlen)) >> (64-xlen))
 
-#define set_pc(x) (npc = sext_xlen(x))
+#define set_pc(x) \
+  do { if ((x) & 3 /* For now... */) \
+         throw trap_instruction_address_misaligned(x); \
+       npc = sext_xlen(x); \
+     } while(0)
+
+#define PC_SERIALIZE 3 /* sentinel value indicating simulator pipeline flush */
 
 #define validate_csr(which, write) ({ \
+  if (!STATE.serialized) return PC_SERIALIZE; \
+  STATE.serialized = false; \
   unsigned my_priv = get_field(STATE.mstatus, MSTATUS_PRV); \
   unsigned csr_priv = get_field((which), 0x300); \
   unsigned csr_read_only = get_field((which), 0xC00) == 3; \
