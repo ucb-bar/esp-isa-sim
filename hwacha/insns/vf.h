@@ -3,7 +3,7 @@ if(!ENABLED)
 
 if (VL) {
   if (!h->vf_active()) {
-    WRITE_VRM(RM);
+    WRITE_VRM(STATE.frm);
     WRITE_VF_PC(XS1 + insn.s_imm());
     for (uint32_t i=0; i<VL; i++)
       h->get_ut_state(i)->run = true;
@@ -28,7 +28,6 @@ vf_loop:
   #undef DECLARE_INSN
 
   if (!matched){
-    printf("unmatched vf instr:%016" PRIx64 ":\n",ut_insn);
     h->take_exception(HWACHA_CAUSE_VF_ILLEGAL_INSTRUCTION, VF_PC);
   }
 

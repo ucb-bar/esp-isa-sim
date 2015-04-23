@@ -8,8 +8,8 @@ REGISTER_EXTENSION(hwacha, []() { return new hwacha_t; })
 
 void ct_state_t::reset()
 {
-  nxpr = 128;
-  nppr = 8;
+  nxpr = 64;
+  nppr = 1;
   maxvl = 32;
   vl = 0;
   count = 0;
@@ -19,7 +19,7 @@ void ct_state_t::reset()
   uint32_t fflags; //accumulated and or'd into control threads on reading
   uint32_t frm; //only readable by work-thread
 
-  enable = false;
+  enable = true;
 
   vf_pc = -1;
   memset(&SPR, 0, sizeof(SPR));
@@ -30,6 +30,7 @@ void ut_state_t::reset()
 {
   memset(this, 0, sizeof(*this));
   run = false;
+  PPR.write(0,1);
 }
 
 void hwacha_t::reset()
