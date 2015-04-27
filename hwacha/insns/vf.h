@@ -27,9 +27,8 @@ vf_loop:
   #include "opcodes_hwacha_ut.h"
   #undef DECLARE_INSN
 
-  if (!matched){
+  if (!matched)
     h->take_exception(HWACHA_CAUSE_VF_ILLEGAL_INSTRUCTION, VF_PC);
-  }
 
   if (!h->get_debug()) {
     if (h->vf_active())

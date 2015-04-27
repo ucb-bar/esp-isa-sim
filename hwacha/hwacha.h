@@ -24,7 +24,7 @@ struct ct_state_t
 
   reg_t vf_pc;
   regfile_t<reg_t, 256, true> SPR;
-  regfile_t<reg_t, 32, true> APR;
+  regfile_t<reg_t, 32, false> APR;
 };
 
 struct ut_state_t

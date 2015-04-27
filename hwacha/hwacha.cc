@@ -112,33 +112,6 @@ void hwacha_t::take_exception(reg_t c, reg_t a)
 {
   cause = c;
   aux = a;
-  printf("aux:%016" PRIx64 ":",aux);
-if(cause == HWACHA_CAUSE_ILLEGAL_CFG)
-  printf("ILL_CFG\n");
-if(cause == HWACHA_CAUSE_ILLEGAL_INSTRUCTION)
-  printf("ILL_INST\n");
-if(cause == HWACHA_CAUSE_PRIVILEGED_INSTRUCTION)
-  printf("PRIV_INST\n");
-if(cause == HWACHA_CAUSE_TVEC_ILLEGAL_REGID)
-  printf("ILL_REGID\n");
-if(cause == HWACHA_CAUSE_VF_MISALIGNED_FETCH)
-  printf("MIS_FETCh\n");
-if(cause == HWACHA_CAUSE_VF_FAULT_FETCH)
-  printf("FAULT_FETCH\n");
-if(cause == HWACHA_CAUSE_VF_ILLEGAL_INSTRUCTION)
-  printf("VF_ILL_INST\n");
-if(cause == HWACHA_CAUSE_VF_ILLEGAL_REGID)
-  printf("VF_ILL_REGID\n");
-if(cause == HWACHA_CAUSE_MISALIGNED_LOAD)
-  printf("MIS_LOAD\n");
-if(cause == HWACHA_CAUSE_MISALIGNED_STORE)
-  printf("MIS_STORE\n");
-if(cause == HWACHA_CAUSE_FAULT_LOAD)
-  printf("FAULT_LOAD\n");
-if(cause == HWACHA_CAUSE_FAULT_STORE)
-  printf("FAULT_STORE\n");
-  
-
   raise_interrupt();
   throw std::logic_error("unreachable!");
 }
