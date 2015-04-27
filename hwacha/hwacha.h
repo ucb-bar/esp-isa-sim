@@ -32,7 +32,7 @@ struct ut_state_t
   void reset();
 
   bool run;
-  regfile_t<reg_t, 256, true> XPR;
+  regfile_t<reg_t, 256, false> XPR;
   regfile_t<bool, 16, false> PPR;
 };
 
