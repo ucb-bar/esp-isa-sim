@@ -8,9 +8,9 @@ REGISTER_EXTENSION(hwacha, []() { return new hwacha_t; })
 
 void ct_state_t::reset()
 {
-  nxpr = 64;
+  nxpr = 256;
   nppr = 1;
-  maxvl = 32;
+  maxvl = 8;
   vl = 0;
   count = 0;
   prec = 64;
