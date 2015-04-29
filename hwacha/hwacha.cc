@@ -22,13 +22,25 @@ void ct_state_t::reset()
   enable = true;
 
   vf_pc = -1;
-  memset(&SPR, 0, sizeof(SPR));
-  memset(&APR, 0, sizeof(APR));
+
+  //randomize non-zero registers
+  for(size_t i = 1; i < MAX_SPR; i++) {
+    SPR.write(i,reg_dis(gen));
+  }
+  for(size_t i = 0; i < MAX_APR; i++) {
+    APR.write(i,reg_dis(gen));
+  }
 }
 
 void ut_state_t::reset()
 {
-  memset(this, 0, sizeof(*this));
+  //randomize non-zero registers
+  for(size_t i = 0; i < MAX_XPR; i++) {
+    XPR.write(i,reg_dis(gen));
+  }
+  for(size_t i = 1; i < MAX_PPR; i++) {
+    PPR.write(i,bool_dis(gen));
+  }
   run = false;
   PPR.write(0,1);
 }
@@ -36,7 +48,7 @@ void ut_state_t::reset()
 void hwacha_t::reset()
 {
   ct_state.reset();
-  for (int i=0; i<max_uts; i++)
+  for (size_t i=0; i<max_uts; i++)
     ut_state[i].reset();
 }
 

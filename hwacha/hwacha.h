@@ -2,9 +2,19 @@
 #define _HWACHA_H
 
 #include "extension.h"
+#include <random>
+#include <limits>
 
+static const uint32_t MAX_XPR = 256;
+static const uint32_t MAX_PPR = 16;
 static const uint32_t MAX_SPR = 256;
 static const uint32_t MAX_APR = 32;
+
+static std::random_device rd;
+static std::mt19937 gen(rd());
+static std::uniform_int_distribution<reg_t> reg_dis(std::numeric_limits<reg_t>::min(),
+    std::numeric_limits<reg_t>::max());
+static std::uniform_int_distribution<int> bool_dis(0,1);
 
 struct ct_state_t
 {
@@ -23,8 +33,8 @@ struct ct_state_t
   bool enable;
 
   reg_t vf_pc;
-  regfile_t<reg_t, 256, true> SPR;
-  regfile_t<reg_t, 32, false> APR;
+  regfile_t<reg_t, MAX_SPR, true> SPR;
+  regfile_t<reg_t, MAX_APR, false> APR;
 };
 
 struct ut_state_t
@@ -32,8 +42,8 @@ struct ut_state_t
   void reset();
 
   bool run;
-  regfile_t<reg_t, 256, false> XPR;
-  regfile_t<bool, 16, false> PPR;
+  regfile_t<reg_t, MAX_XPR, false> XPR;
+  regfile_t<bool, MAX_PPR, false> PPR;
 };
 
 class hwacha_t : public extension_t
