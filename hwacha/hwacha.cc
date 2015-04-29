@@ -24,22 +24,22 @@ void ct_state_t::reset()
   vf_pc = -1;
 
   //randomize non-zero registers
-  for(size_t i = 1; i < MAX_SPR; i++) {
-    SPR.write(i,reg_dis(gen));
+  for (size_t i = 1; i < MAX_SPR; i++) {
+    SPR.write(i, reg_dis(gen));
   }
-  for(size_t i = 0; i < MAX_APR; i++) {
-    APR.write(i,reg_dis(gen));
+  for (size_t i = 0; i < MAX_APR; i++) {
+    APR.write(i, reg_dis(gen));
   }
 }
 
 void ut_state_t::reset()
 {
   //randomize non-zero registers
-  for(size_t i = 0; i < MAX_XPR; i++) {
-    XPR.write(i,reg_dis(gen));
+  for (size_t i = 0; i < MAX_XPR; i++) {
+    XPR.write(i, reg_dis(gen));
   }
-  for(size_t i = 1; i < MAX_PPR; i++) {
-    PPR.write(i,bool_dis(gen));
+  for (size_t i = 1; i < MAX_PPR; i++) {
+    PPR.write(i, bool_dis(gen));
   }
   run = false;
   PPR.write(0,1);
