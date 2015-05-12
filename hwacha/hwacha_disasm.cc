@@ -14,39 +14,46 @@ static const char* fpr[] = {
   "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"
 };
 
-static const char* vxpr[] = {
- "vx0",  "vx1",  "vx2",  "vx3",  "vx4",  "vx5",  "vx6",  "vx7",
- "vx8",  "vx9",  "vx10",  "vx11",  "vx12",  "vx13",  "vx14",  "vx15",
- "vx16",  "vx17",  "vx18",  "vx19",  "vx20",  "vx21",  "vx22",  "vx23",
- "vx24",  "vx25",  "vx26",  "vx27",  "vx28",  "vx29",  "vx30",  "vx31",
- "vx32",  "vx33",  "vx34",  "vx35",  "vx36",  "vx37",  "vx38",  "vx39",
- "vx40",  "vx41",  "vx42",  "vx43",  "vx44",  "vx45",  "vx46",  "vx47",
- "vx48",  "vx49",  "vx50",  "vx51",  "vx52",  "vx53",  "vx54",  "vx55",
- "vx56",  "vx57",  "vx58",  "vx59",  "vx60",  "vx61",  "vx62",  "vx63",
- "vx64",  "vx65",  "vx66",  "vx67",  "vx68",  "vx69",  "vx70",  "vx71",
- "vx72",  "vx73",  "vx74",  "vx75",  "vx76",  "vx77",  "vx78",  "vx79",
- "vx80",  "vx81",  "vx82",  "vx83",  "vx84",  "vx85",  "vx86",  "vx87",
- "vx88",  "vx89",  "vx90",  "vx91",  "vx92",  "vx93",  "vx94",  "vx95",
- "vx96",  "vx97",  "vx98",  "vx99", "vx100", "vx101", "vx102", "vx103",
- "vx104", "vx105", "vx106", "vx107", "vx108", "vx109", "vx110", "vx111",
- "vx112", "vx113", "vx114", "vx115", "vx116", "vx117", "vx118", "vx119",
- "vx120", "vx121", "vx122", "vx123", "vx124", "vx125", "vx126", "vx127",
- "vx128", "vx129", "vx130", "vx131", "vx132", "vx133", "vx134", "vx135",
- "vx136", "vx137", "vx138", "vx139", "vx140", "vx141", "vx142", "vx143",
- "vx144", "vx145", "vx146", "vx147", "vx148", "vx149", "vx150", "vx151",
- "vx152", "vx153", "vx154", "vx155", "vx156", "vx157", "vx158", "vx159",
- "vx160", "vx161", "vx162", "vx163", "vx164", "vx165", "vx166", "vx167",
- "vx168", "vx169", "vx170", "vx171", "vx172", "vx173", "vx174", "vx175",
- "vx176", "vx177", "vx178", "vx179", "vx180", "vx181", "vx182", "vx183",
- "vx184", "vx185", "vx186", "vx187", "vx188", "vx189", "vx190", "vx191",
- "vx192", "vx193", "vx194", "vx195", "vx196", "vx197", "vx198", "vx199",
- "vx200", "vx201", "vx202", "vx203", "vx204", "vx205", "vx206", "vx207",
- "vx208", "vx209", "vx210", "vx211", "vx212", "vx213", "vx214", "vx215",
- "vx216", "vx217", "vx218", "vx219", "vx220", "vx221", "vx222", "vx223",
- "vx224", "vx225", "vx226", "vx227", "vx228", "vx229", "vx230", "vx231",
- "vx232", "vx233", "vx234", "vx235", "vx236", "vx237", "vx238", "vx239",
- "vx240", "vx241", "vx242", "vx243", "vx244", "vx245", "vx246", "vx247",
- "vx248", "vx249", "vx250", "vx251", "vx252", "vx253", "vx254", "vx255"
+static const char* vvpr[] = {
+ "vv0",  "vv1",  "vv2",  "vv3",  "vv4",  "vv5",  "vv6",  "vv7",
+ "vv8",  "vv9",  "vv10",  "vv11",  "vv12",  "vv13",  "vv14",  "vv15",
+ "vv16",  "vv17",  "vv18",  "vv19",  "vv20",  "vv21",  "vv22",  "vv23",
+ "vv24",  "vv25",  "vv26",  "vv27",  "vv28",  "vv29",  "vv30",  "vv31",
+ "vv32",  "vv33",  "vv34",  "vv35",  "vv36",  "vv37",  "vv38",  "vv39",
+ "vv40",  "vv41",  "vv42",  "vv43",  "vv44",  "vv45",  "vv46",  "vv47",
+ "vv48",  "vv49",  "vv50",  "vv51",  "vv52",  "vv53",  "vv54",  "vv55",
+ "vv56",  "vv57",  "vv58",  "vv59",  "vv60",  "vv61",  "vv62",  "vv63",
+ "vv64",  "vv65",  "vv66",  "vv67",  "vv68",  "vv69",  "vv70",  "vv71",
+ "vv72",  "vv73",  "vv74",  "vv75",  "vv76",  "vv77",  "vv78",  "vv79",
+ "vv80",  "vv81",  "vv82",  "vv83",  "vv84",  "vv85",  "vv86",  "vv87",
+ "vv88",  "vv89",  "vv90",  "vv91",  "vv92",  "vv93",  "vv94",  "vv95",
+ "vv96",  "vv97",  "vv98",  "vv99", "vv100", "vv101", "vv102", "vv103",
+ "vv104", "vv105", "vv106", "vv107", "vv108", "vv109", "vv110", "vv111",
+ "vv112", "vv113", "vv114", "vv115", "vv116", "vv117", "vv118", "vv119",
+ "vv120", "vv121", "vv122", "vv123", "vv124", "vv125", "vv126", "vv127",
+ "vv128", "vv129", "vv130", "vv131", "vv132", "vv133", "vv134", "vv135",
+ "vv136", "vv137", "vv138", "vv139", "vv140", "vv141", "vv142", "vv143",
+ "vv144", "vv145", "vv146", "vv147", "vv148", "vv149", "vv150", "vv151",
+ "vv152", "vv153", "vv154", "vv155", "vv156", "vv157", "vv158", "vv159",
+ "vv160", "vv161", "vv162", "vv163", "vv164", "vv165", "vv166", "vv167",
+ "vv168", "vv169", "vv170", "vv171", "vv172", "vv173", "vv174", "vv175",
+ "vv176", "vv177", "vv178", "vv179", "vv180", "vv181", "vv182", "vv183",
+ "vv184", "vv185", "vv186", "vv187", "vv188", "vv189", "vv190", "vv191",
+ "vv192", "vv193", "vv194", "vv195", "vv196", "vv197", "vv198", "vv199",
+ "vv200", "vv201", "vv202", "vv203", "vv204", "vv205", "vv206", "vv207",
+ "vv208", "vv209", "vv210", "vv211", "vv212", "vv213", "vv214", "vv215",
+ "vv216", "vv217", "vv218", "vv219", "vv220", "vv221", "vv222", "vv223",
+ "vv224", "vv225", "vv226", "vv227", "vv228", "vv229", "vv230", "vv231",
+ "vv232", "vv233", "vv234", "vv235", "vv236", "vv237", "vv238", "vv239",
+ "vv240", "vv241", "vv242", "vv243", "vv244", "vv245", "vv246", "vv247",
+ "vv248", "vv249", "vv250", "vv251", "vv252", "vv253", "vv254", "vv255"
+};
+
+static const char* vapr[] = {
+ "vva",  "va1",  "va2",  "va3",  "va4",  "va5",  "va6",  "va7",
+ "va8",  "va9",  "va10",  "va11",  "va12",  "va13",  "va14",  "va15",
+ "va16",  "va17",  "va18",  "va19",  "va20",  "va21",  "va22",  "va23",
+ "va24",  "va25",  "va26",  "va27",  "va28",  "va29",  "va30",  "va31"
 };
 
 static const char* vspr[] = {
@@ -133,33 +140,33 @@ struct : public arg_t {
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return xpr[insn.svsrd()];
+    return vspr[insn.svsrd()];
   }
 } svsrd;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return xpr[insn.svard()];
+    return vapr[insn.svard()];
   }
 } svard;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vxpr[insn.vrd()];
+    return vvpr[insn.vrd()];
   }
-} vxrd;
+} vvrd;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vxpr[insn.vrs1()];
+    return vvpr[insn.vrs1()];
   }
-} vxrs1;
+} vvrs1;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vxpr[insn.vrs2()];
+    return vvpr[insn.vrs2()];
   }
-} vxrs2;
+} vvrs2;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
@@ -229,7 +236,7 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
     ut_disassembler.add_insn(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__));
 
   DISASM_UT_INSN("vstop", vstop, 0, {});
-  DISASM_UT_INSN("veidx", veidx, 0, {&vxrd});
+  DISASM_UT_INSN("veidx", veidx, 0, {&vvrd});
 
   const uint64_t mask_vseglen = 0x7UL << 29;
 
@@ -237,44 +244,44 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
     DISASM_UT_INSN(name1, code, mask_vseglen, __VA_ARGS__) \
     DISASM_UT_INSN(name2, code, 0, __VA_ARGS__) \
 
-  DISASM_VMEM_INSN("vld",    "vlsegd",    vlsegd,    {&vxrd, &vsrs1});
-  DISASM_VMEM_INSN("vlw",    "vlsegw",    vlsegw,    {&vxrd, &vsrs1});
-  DISASM_VMEM_INSN("vlwu",   "vlsegwu",   vlsegwu,   {&vxrd, &vsrs1});
-  DISASM_VMEM_INSN("vlh",    "vlsegh",    vlsegh,    {&vxrd, &vsrs1});
-  DISASM_VMEM_INSN("vlhu",   "vlseghu",   vlseghu,   {&vxrd, &vsrs1});
-  DISASM_VMEM_INSN("vlb",    "vlsegb",    vlsegb,    {&vxrd, &vsrs1});
-  DISASM_VMEM_INSN("vlbu",   "vlsegbu",   vlsegbu,   {&vxrd, &vsrs1});
+  DISASM_VMEM_INSN("vld",    "vlsegd",    vlsegd,    {&vvrd, &vsrs1});
+  DISASM_VMEM_INSN("vlw",    "vlsegw",    vlsegw,    {&vvrd, &vsrs1});
+  DISASM_VMEM_INSN("vlwu",   "vlsegwu",   vlsegwu,   {&vvrd, &vsrs1});
+  DISASM_VMEM_INSN("vlh",    "vlsegh",    vlsegh,    {&vvrd, &vsrs1});
+  DISASM_VMEM_INSN("vlhu",   "vlseghu",   vlseghu,   {&vvrd, &vsrs1});
+  DISASM_VMEM_INSN("vlb",    "vlsegb",    vlsegb,    {&vvrd, &vsrs1});
+  DISASM_VMEM_INSN("vlbu",   "vlsegbu",   vlsegbu,   {&vvrd, &vsrs1});
 
-  DISASM_VMEM_INSN("vlstd",  "vlsegstd",  vlsegstd,  {&vxrd, &vsrs1, &vsrs2});
-  DISASM_VMEM_INSN("vlstw",  "vlsegstw",  vlsegstw,  {&vxrd, &vsrs1, &vsrs2});
-  DISASM_VMEM_INSN("vlstwu", "vlsegstwu", vlsegstwu, {&vxrd, &vsrs1, &vsrs2});
-  DISASM_VMEM_INSN("vlsth",  "vlsegsth",  vlsegsth,  {&vxrd, &vsrs1, &vsrs2});
-  DISASM_VMEM_INSN("vlsthu", "vlsegsthu", vlsegsthu, {&vxrd, &vsrs1, &vsrs2});
-  DISASM_VMEM_INSN("vlstb",  "vlsegstb",  vlsegstb,  {&vxrd, &vsrs1, &vsrs2});
-  DISASM_VMEM_INSN("vlstbu", "vlsegstbu", vlsegstbu, {&vxrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vlstd",  "vlsegstd",  vlsegstd,  {&vvrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vlstw",  "vlsegstw",  vlsegstw,  {&vvrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vlstwu", "vlsegstwu", vlsegstwu, {&vvrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vlsth",  "vlsegsth",  vlsegsth,  {&vvrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vlsthu", "vlsegsthu", vlsegsthu, {&vvrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vlstb",  "vlsegstb",  vlsegstb,  {&vvrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vlstbu", "vlsegstbu", vlsegstbu, {&vvrd, &vsrs1, &vsrs2});
 
-  DISASM_VMEM_INSN("vsd",    "vssegd",    vssegd,    {&vxrd, &vsrs1});
-  DISASM_VMEM_INSN("vsw",    "vssegw",    vssegw,    {&vxrd, &vsrs1});
-  DISASM_VMEM_INSN("vsh",    "vssegh",    vssegh,    {&vxrd, &vsrs1});
-  DISASM_VMEM_INSN("vsb",    "vssegb",    vssegb,    {&vxrd, &vsrs1});
+  DISASM_VMEM_INSN("vsd",    "vssegd",    vssegd,    {&vvrd, &vsrs1});
+  DISASM_VMEM_INSN("vsw",    "vssegw",    vssegw,    {&vvrd, &vsrs1});
+  DISASM_VMEM_INSN("vsh",    "vssegh",    vssegh,    {&vvrd, &vsrs1});
+  DISASM_VMEM_INSN("vsb",    "vssegb",    vssegb,    {&vvrd, &vsrs1});
 
-  DISASM_VMEM_INSN("vsstd",  "vssegstd",  vssegstd,  {&vxrd, &vsrs1, &vsrs2});
-  DISASM_VMEM_INSN("vsstw",  "vssegstw",  vssegstw,  {&vxrd, &vsrs1, &vsrs2});
-  DISASM_VMEM_INSN("vssth",  "vssegsth",  vssegsth,  {&vxrd, &vsrs1, &vsrs2});
-  DISASM_VMEM_INSN("vsstb",  "vssegstb",  vssegstb,  {&vxrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vsstd",  "vssegstd",  vssegstd,  {&vvrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vsstw",  "vssegstw",  vssegstw,  {&vvrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vssth",  "vssegsth",  vssegsth,  {&vvrd, &vsrs1, &vsrs2});
+  DISASM_VMEM_INSN("vsstb",  "vssegstb",  vssegstb,  {&vvrd, &vsrs1, &vsrs2});
 
-  DISASM_VMEM_INSN("vlxd",    "vlsegxd",    vlsegxd, {&vxrd, &vsrs1, &vxrs2});
-  DISASM_VMEM_INSN("vlxw",    "vlsegxw",    vlsegxw, {&vxrd, &vsrs1, &vxrs2});
-  DISASM_VMEM_INSN("vlxwu",   "vlsegxwu",   vlsegxwu,{&vxrd, &vsrs1, &vxrs2});
-  DISASM_VMEM_INSN("vlxh",    "vlsegxh",    vlsegxh, {&vxrd, &vsrs1, &vxrs2});
-  DISASM_VMEM_INSN("vlxhu",   "vlsegxhu",   vlsegxhu,{&vxrd, &vsrs1, &vxrs2});
-  DISASM_VMEM_INSN("vlxb",    "vlsegxb",    vlsegxb, {&vxrd, &vsrs1, &vxrs2});
-  DISASM_VMEM_INSN("vlxbu",   "vlsegxbu",   vlsegxbu,{&vxrd, &vsrs1, &vxrs2});
+  DISASM_VMEM_INSN("vlxd",    "vlsegxd",    vlsegxd, {&vvrd, &vsrs1, &vvrs2});
+  DISASM_VMEM_INSN("vlxw",    "vlsegxw",    vlsegxw, {&vvrd, &vsrs1, &vvrs2});
+  DISASM_VMEM_INSN("vlxwu",   "vlsegxwu",   vlsegxwu,{&vvrd, &vsrs1, &vvrs2});
+  DISASM_VMEM_INSN("vlxh",    "vlsegxh",    vlsegxh, {&vvrd, &vsrs1, &vvrs2});
+  DISASM_VMEM_INSN("vlxhu",   "vlsegxhu",   vlsegxhu,{&vvrd, &vsrs1, &vvrs2});
+  DISASM_VMEM_INSN("vlxb",    "vlsegxb",    vlsegxb, {&vvrd, &vsrs1, &vvrs2});
+  DISASM_VMEM_INSN("vlxbu",   "vlsegxbu",   vlsegxbu,{&vvrd, &vsrs1, &vvrs2});
 
-  DISASM_VMEM_INSN("vsxd",    "vssegxd",    vssegxd, {&vxrd, &vsrs1, &vxrs2});
-  DISASM_VMEM_INSN("vsxw",    "vssegxw",    vssegxw, {&vxrd, &vsrs1, &vxrs2});
-  DISASM_VMEM_INSN("vsxh",    "vssegxh",    vssegxh, {&vxrd, &vsrs1, &vxrs2});
-  DISASM_VMEM_INSN("vsxb",    "vssegxb",    vssegxb, {&vxrd, &vsrs1, &vxrs2});
+  DISASM_VMEM_INSN("vsxd",    "vssegxd",    vssegxd, {&vvrd, &vsrs1, &vvrs2});
+  DISASM_VMEM_INSN("vsxw",    "vssegxw",    vssegxw, {&vvrd, &vsrs1, &vvrs2});
+  DISASM_VMEM_INSN("vsxh",    "vssegxh",    vssegxh, {&vvrd, &vsrs1, &vvrs2});
+  DISASM_VMEM_INSN("vsxb",    "vssegxb",    vssegxb, {&vvrd, &vsrs1, &vvrs2});
 
   return insns;
 }

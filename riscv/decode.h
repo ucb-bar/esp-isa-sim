@@ -71,7 +71,7 @@ public:
   uint64_t rs3() { return x(27, 5); }
   int64_t v_imm() { return int64_t(b) >> 32; }
   int64_t vc_imm() { return int64_t(b) >> 35 << 3; }
-  uint64_t svsrd() { return (x(20,2)<<5) | (x(7, 5)); }
+  uint64_t svsrd() { return (x(20,3)<<5) | (x(7, 5)); }
   uint64_t svard() { return rd(); }
   uint64_t vrd() { return x(16, 8); }
   uint64_t vrs1() { return x(24, 8); }
