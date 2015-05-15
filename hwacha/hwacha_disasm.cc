@@ -170,6 +170,12 @@ struct : public arg_t {
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
+    return vspr[insn.vrd()];
+  }
+} vsrd;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
     return vspr[insn.vrs1()];
   }
 } vsrs1;
@@ -179,6 +185,30 @@ struct : public arg_t {
     return vspr[insn.vrs2()];
   }
 } vsrs2;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
+    return insn.vd() ? vvpr[insn.vrd()] : vspr[insn.vrd()];
+  }
+} vdrd;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
+    return insn.vs1() ? vvpr[insn.vrs1()] : vspr[insn.vrs1()];
+  }
+} vdrs1;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
+    return insn.vs2() ? vvpr[insn.vrs2()] : vspr[insn.vrs2()];
+  }
+} vdrs2;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
+    return insn.vs3() ? vvpr[insn.vrs3()] : vspr[insn.vrs3()];
+  }
+} vdrs3;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
@@ -197,6 +227,18 @@ struct : public arg_t {
     return std::to_string((int)insn.s_imm()) + '(' + xpr[insn.rs1()] + ')';
   }
 } vf_addr;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
+    return std::string("0(") + vvpr[insn.vrs1()] + ')';
+  }
+} vamo_address;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
+    return std::to_string((int)insn.v_imm());
+  }
+} vimm;
 
 std::vector<disasm_insn_t*> hwacha_t::get_disasms()
 {
@@ -233,10 +275,139 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
   #undef DECLARE_INSN
 
   #define DISASM_UT_INSN(name, code, extra, ...) \
+    insns.push_back(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__)); \
     ut_disassembler.add_insn(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__));
+
+  #define DEFINE_RTYPE(code) DISASM_UT_INSN(#code, code, 0, {&vdrd, &vdrs1, &vdrs2})
+  #define DEFINE_R1TYPE(code) DISASM_UT_INSN(#code, code, 0, {&vdrd, &vdrs1})
+  #define DEFINE_R3TYPE(code) DISASM_UT_INSN(#code, code, 0, {&vdrd, &vdrs1, &vdrs2, &vdrs3})
+  #define DEFINE_ITYPE(code) DISASM_UT_INSN(#code, code, 0, {&vsrd, &vsrs1, &vimm})
+  #define DEFINE_XLOAD(code) DISASM_UT_INSN(#code, code, 0, {&vvrd, &vars1, &vvrs2})
+  #define DEFINE_XSTORE(code) DISASM_UT_INSN(#code, code, 0, {&vvrs2, &vars1, $vvrs2})
+  #define DEFINE_XAMO(code) DISASM_UT_INSN(#code, code, 0, {&vvrd, &vamo_address, &vdrs2})
 
   DISASM_UT_INSN("vstop", vstop, 0, {});
   DISASM_UT_INSN("veidx", veidx, 0, {&vvrd});
+
+  DEFINE_ITYPE(vaddi);
+  DEFINE_ITYPE(vslli);
+  DEFINE_ITYPE(vslti);
+  DEFINE_ITYPE(vsltiu);
+  DEFINE_ITYPE(vxori);
+  DEFINE_ITYPE(vsrli);
+  DEFINE_ITYPE(vsrai);
+  DEFINE_ITYPE(vori);
+  DEFINE_ITYPE(vandi);
+  DEFINE_ITYPE(vaddiw);
+  DEFINE_ITYPE(vslliw);
+  DEFINE_ITYPE(vsrliw);
+  DEFINE_ITYPE(vsraiw);
+
+  DEFINE_RTYPE(vadd);
+  DEFINE_RTYPE(vsub);
+  DEFINE_RTYPE(vsll);
+  DEFINE_RTYPE(vslt);
+  DEFINE_RTYPE(vsltu);
+  DEFINE_RTYPE(vxor);
+  DEFINE_RTYPE(vsrl);
+  DEFINE_RTYPE(vsra);
+  DEFINE_RTYPE(vor);
+  DEFINE_RTYPE(vand);
+  DEFINE_RTYPE(vmul);
+  DEFINE_RTYPE(vmulh);
+  DEFINE_RTYPE(vmulhu);
+  DEFINE_RTYPE(vmulhsu);
+  DEFINE_RTYPE(vdiv);
+  DEFINE_RTYPE(vdivu);
+  DEFINE_RTYPE(vrem);
+  DEFINE_RTYPE(vremu);
+  DEFINE_RTYPE(vaddw);
+  DEFINE_RTYPE(vsubw);
+  DEFINE_RTYPE(vsllw);
+  DEFINE_RTYPE(vsrlw);
+  DEFINE_RTYPE(vsraw);
+  DEFINE_RTYPE(vmulw);
+  DEFINE_RTYPE(vdivw);
+  DEFINE_RTYPE(vdivuw);
+  DEFINE_RTYPE(vremw);
+  DEFINE_RTYPE(vremuw);
+
+  DEFINE_RTYPE(vfadd_s);
+  DEFINE_RTYPE(vfsub_s);
+  DEFINE_RTYPE(vfmul_s);
+  DEFINE_RTYPE(vfdiv_s);
+  DEFINE_R1TYPE(vfsqrt_s);
+  DEFINE_RTYPE(vfmin_s);
+  DEFINE_RTYPE(vfmax_s);
+  DEFINE_R3TYPE(vfmadd_s);
+  DEFINE_R3TYPE(vfmsub_s);
+  DEFINE_R3TYPE(vfnmadd_s);
+  DEFINE_R3TYPE(vfnmsub_s);
+  DEFINE_RTYPE(vfsgnj_s);
+  DEFINE_RTYPE(vfsgnjn_s);
+  DEFINE_RTYPE(vfsgnjx_s);
+  DEFINE_R1TYPE(vfcvt_s_d);
+  DEFINE_R1TYPE(vfcvt_s_l);
+  DEFINE_R1TYPE(vfcvt_s_lu);
+  DEFINE_R1TYPE(vfcvt_s_w);
+  DEFINE_R1TYPE(vfcvt_s_wu);
+  DEFINE_R1TYPE(vfcvt_s_wu);
+  DEFINE_R1TYPE(vfcvt_l_s);
+  DEFINE_R1TYPE(vfcvt_lu_s);
+  DEFINE_R1TYPE(vfcvt_w_s);
+  DEFINE_R1TYPE(vfcvt_wu_s);
+  DEFINE_R1TYPE(vfclass_s);
+  DEFINE_R1TYPE(vcmpfeq_s);
+  DEFINE_R1TYPE(vcmpflt_s);
+  DEFINE_R1TYPE(vcmpfle_s);
+
+  DEFINE_RTYPE(vfadd_d);
+  DEFINE_RTYPE(vfsub_d);
+  DEFINE_RTYPE(vfmul_d);
+  DEFINE_RTYPE(vfdiv_d);
+  DEFINE_R1TYPE(vfsqrt_d);
+  DEFINE_RTYPE(vfmin_d);
+  DEFINE_RTYPE(vfmax_d);
+  DEFINE_R3TYPE(vfmadd_d);
+  DEFINE_R3TYPE(vfmsub_d);
+  DEFINE_R3TYPE(vfnmadd_d);
+  DEFINE_R3TYPE(vfnmsub_d);
+  DEFINE_RTYPE(vfsgnj_d);
+  DEFINE_RTYPE(vfsgnjn_d);
+  DEFINE_RTYPE(vfsgnjx_d);
+  DEFINE_R1TYPE(vfcvt_d_s);
+  DEFINE_R1TYPE(vfcvt_d_l);
+  DEFINE_R1TYPE(vfcvt_d_lu);
+  DEFINE_R1TYPE(vfcvt_d_w);
+  DEFINE_R1TYPE(vfcvt_d_wu);
+  DEFINE_R1TYPE(vfcvt_d_wu);
+  DEFINE_R1TYPE(vfcvt_l_d);
+  DEFINE_R1TYPE(vfcvt_lu_d);
+  DEFINE_R1TYPE(vfcvt_w_d);
+  DEFINE_R1TYPE(vfcvt_wu_d);
+  DEFINE_R1TYPE(vfclass_d);
+  DEFINE_R1TYPE(vcmpfeq_d);
+  DEFINE_R1TYPE(vcmpflt_d);
+  DEFINE_R1TYPE(vcmpfle_d);
+
+  DEFINE_XAMO(vamoadd_w)
+  DEFINE_XAMO(vamoswap_w)
+  DEFINE_XAMO(vamoand_w)
+  DEFINE_XAMO(vamoor_w)
+  DEFINE_XAMO(vamoxor_w)
+  DEFINE_XAMO(vamomin_w)
+  DEFINE_XAMO(vamomax_w)
+  DEFINE_XAMO(vamominu_w)
+  DEFINE_XAMO(vamomaxu_w)
+  DEFINE_XAMO(vamoadd_d)
+  DEFINE_XAMO(vamoswap_d)
+  DEFINE_XAMO(vamoand_d)
+  DEFINE_XAMO(vamoor_d)
+  DEFINE_XAMO(vamoxor_d)
+  DEFINE_XAMO(vamomin_d)
+  DEFINE_XAMO(vamomax_d)
+  DEFINE_XAMO(vamominu_d)
+  DEFINE_XAMO(vamomaxu_d)
 
   const uint64_t mask_vseglen = 0x7UL << 29;
 
