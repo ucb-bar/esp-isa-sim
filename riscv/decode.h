@@ -83,7 +83,7 @@ public:
   uint64_t vprs3() { return x(41, 4); }
   uint64_t vars1() { return x(24, 5); }
   uint64_t vars2() { return x(33, 5); }
-  uint64_t vseg() { return x(50, 3); }
+  uint64_t vseg() { return x(45, 3); }
   uint64_t vpred() { return x(12, 4); }
   uint64_t vn() { return x(32, 1); }
   uint64_t vcond() { return x(33, 2); }
