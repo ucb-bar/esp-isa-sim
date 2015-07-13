@@ -151,6 +151,9 @@ void processor_t::take_interrupt()
     if (interrupts & MIP_MSIP)
       raise_interrupt(IRQ_SOFT);
 
+    if (interrupts & MIP_MTIP)
+      raise_interrupt(IRQ_TIMER);
+
     if (state.fromhost != 0)
       raise_interrupt(IRQ_HOST);
   }
@@ -202,18 +205,10 @@ static reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
   return npc;
 }
 
-static void update_timer(state_t* state, size_t instret)
+void processor_t::check_timer()
 {
-  uint64_t count0 = (uint64_t)(uint32_t)state->mtime;
-  state->mtime += instret;
-  uint64_t before = count0 - state->stimecmp;
-  if (int64_t(before ^ (before + instret)) < 0)
-    state->mip |= MIP_STIP;
-}
-
-static size_t next_timer(state_t* state)
-{
-  return state->stimecmp - (uint32_t)state->mtime;
+  if (sim->rtc >= state.mtimecmp)
+    state.mip |= MIP_MTIP;
 }
 
 void processor_t::step(size_t n)
@@ -224,17 +219,17 @@ void processor_t::step(size_t n)
 
   if (unlikely(!run || !n))
     return;
-  n = std::min(n, next_timer(&state) | 1U);
 
   #define maybe_serialize() \
    if (unlikely(pc == PC_SERIALIZE)) { \
      pc = state.pc; \
      state.serialized = true; \
-     continue; \
+     break; \
    }
 
   try
   {
+    check_timer();
     take_interrupt();
 
     if (unlikely(debug))
@@ -261,6 +256,7 @@ void processor_t::step(size_t n)
         pc = execute_insn(this, pc, fetch); \
         if (idx == mmu_t::ICACHE_ENTRIES-1) break; \
         if (unlikely(ic_entry->tag != pc)) break; \
+        if (unlikely(instret+1 == n)) break; \
         instret++; \
         state.pc = pc; \
       }
@@ -276,10 +272,14 @@ void processor_t::step(size_t n)
   }
   catch(trap_t& t)
   {
-    state.pc = take_trap(t, pc);
+    take_trap(t, pc);
   }
 
-  update_timer(&state, instret);
+  state.minstret += instret;
+
+  // tail-recurse if we didn't execute as many instructions as we'd hoped
+  if (instret < n)
+    step(n - instret);
 }
 
 void processor_t::push_privilege_stack()
@@ -307,19 +307,18 @@ void processor_t::pop_privilege_stack()
   set_csr(CSR_MSTATUS, s);
 }
 
-reg_t processor_t::take_trap(trap_t& t, reg_t epc)
+void processor_t::take_trap(trap_t& t, reg_t epc)
 {
   if (debug)
     fprintf(stderr, "core %3d: exception %s, epc 0x%016" PRIx64 "\n",
             id, t.name(), epc);
 
-  reg_t tvec = DEFAULT_MTVEC + 0x40 * get_field(state.mstatus, MSTATUS_PRV);
+  state.pc = DEFAULT_MTVEC + 0x40 * get_field(state.mstatus, MSTATUS_PRV);
   push_privilege_stack();
   yield_load_reservation();
   state.mcause = t.cause();
   state.mepc = epc;
   t.side_effects(&state); // might set badvaddr etc.
-  return tvec;
 }
 
 void processor_t::deliver_ipi()
@@ -367,29 +366,35 @@ void processor_t::set_csr(int which, reg_t val)
       break;
     case CSR_MTIME:
     case CSR_STIMEW:
-      state.mtime = val;
+      // this implementation ignores writes to MTIME
       break;
     case CSR_MTIMEH:
     case CSR_STIMEHW:
-      if (xlen == 32)
-        state.mtime = (uint32_t)val | (state.mtime >> 32 << 32);
-      else
-        state.mtime = val;
+      // this implementation ignores writes to MTIME
       break;
-    case CSR_CYCLEW:
     case CSR_TIMEW:
-    case CSR_INSTRETW:
-      val -= state.mtime;
+      val -= sim->rtc;
       if (xlen == 32)
         state.sutime_delta = (uint32_t)val | (state.sutime_delta >> 32 << 32);
       else
         state.sutime_delta = val;
       break;
-    case CSR_CYCLEHW:
     case CSR_TIMEHW:
-    case CSR_INSTRETHW:
-      val -= state.mtime;
+      val = ((val << 32) - sim->rtc) >> 32;
       state.sutime_delta = (val << 32) | (uint32_t)state.sutime_delta;
+      break;
+    case CSR_CYCLEW:
+    case CSR_INSTRETW:
+      val -= state.minstret;
+      if (xlen == 32)
+        state.suinstret_delta = (uint32_t)val | (state.suinstret_delta >> 32 << 32);
+      else
+        state.suinstret_delta = val;
+      break;
+    case CSR_CYCLEHW:
+    case CSR_INSTRETHW:
+      val = ((val << 32) - state.minstret) >> 32;
+      state.suinstret_delta = (val << 32) | (uint32_t)state.suinstret_delta;
       break;
     case CSR_MSTATUS: {
       if ((val ^ state.mstatus) & (MSTATUS_VM | MSTATUS_PRV | MSTATUS_PRV1 | MSTATUS_MPRV))
@@ -422,12 +427,12 @@ void processor_t::set_csr(int which, reg_t val)
       break;
     }
     case CSR_MIP: {
-      reg_t mask = MIP_SSIP | MIP_MSIP;
+      reg_t mask = MIP_SSIP | MIP_MSIP | MIP_STIP;
       state.mip = (state.mip & ~mask) | (val & mask);
       break;
     }
     case CSR_MIE: {
-      reg_t mask = MIP_SSIP | MIP_MSIP | MIP_STIP;
+      reg_t mask = MIP_SSIP | MIP_MSIP | MIP_STIP | MIP_MTIP;
       state.mie = (state.mie & ~mask) | (val & mask);
       break;
     }
@@ -453,16 +458,16 @@ void processor_t::set_csr(int which, reg_t val)
     }
     case CSR_SEPC: state.sepc = val; break;
     case CSR_STVEC: state.stvec = val & ~3; break;
-    case CSR_STIMECMP:
-      state.mip &= ~MIP_STIP;
-      state.stimecmp = val;
-      break;
     case CSR_SPTBR: state.sptbr = zext_xlen(val & -PGSIZE); break;
     case CSR_SSCRATCH: state.sscratch = val; break;
     case CSR_MEPC: state.mepc = val; break;
     case CSR_MSCRATCH: state.mscratch = val; break;
     case CSR_MCAUSE: state.mcause = val; break;
     case CSR_MBADADDR: state.mbadaddr = val; break;
+    case CSR_MTIMECMP:
+      state.mip &= ~MIP_MTIP;
+      state.mtimecmp = val;
+      break;
     case CSR_SEND_IPI: sim->send_ipi(val); break;
     case CSR_MTOHOST:
       if (state.tohost == 0)
@@ -492,29 +497,33 @@ reg_t processor_t::get_csr(int which)
         break;
       return (state.fflags << FSR_AEXC_SHIFT) | (state.frm << FSR_RD_SHIFT);
     case CSR_MTIME:
-    case CSR_STIMEW:
-      return state.mtime;
-    case CSR_MTIMEH:
-    case CSR_STIMEHW:
-      return state.mtime >> 32;
-    case CSR_CYCLE:
-    case CSR_TIME:
-    case CSR_INSTRET:
     case CSR_STIME:
-    case CSR_CYCLEW:
-    case CSR_TIMEW:
-    case CSR_INSTRETW:
-      return state.mtime + state.sutime_delta;
-    case CSR_CYCLEH:
-    case CSR_TIMEH:
-    case CSR_INSTRETH:
+    case CSR_STIMEW:
+      return sim->rtc;
+    case CSR_MTIMEH:
     case CSR_STIMEH:
-    case CSR_CYCLEHW:
+    case CSR_STIMEHW:
+      return sim->rtc >> 32;
+    case CSR_TIME:
+    case CSR_TIMEW:
+      return sim->rtc + state.sutime_delta;
+    case CSR_CYCLE:
+    case CSR_CYCLEW:
+    case CSR_INSTRET:
+    case CSR_INSTRETW:
+      return state.minstret + state.suinstret_delta;
+    case CSR_TIMEH:
     case CSR_TIMEHW:
+      if (xlen == 64)
+        break;
+      return (sim->rtc + state.sutime_delta) >> 32;
+    case CSR_CYCLEH:
+    case CSR_INSTRETH:
+    case CSR_CYCLEHW:
     case CSR_INSTRETHW:
       if (xlen == 64)
         break;
-      return (state.mtime + state.sutime_delta) >> 32;
+      return (state.minstret + state.suinstret_delta) >> 32;
     case CSR_SSTATUS: {
       reg_t ss = 0;
       ss = set_field(ss, SSTATUS_IE, get_field(state.mstatus, MSTATUS_IE));
@@ -532,7 +541,6 @@ reg_t processor_t::get_csr(int which)
     case CSR_SEPC: return state.sepc;
     case CSR_SBADADDR: return state.sbadaddr;
     case CSR_STVEC: return state.stvec;
-    case CSR_STIMECMP: return state.stimecmp;
     case CSR_SCAUSE:
       if (max_xlen > xlen)
         return state.scause | ((state.scause >> (max_xlen-1)) << (xlen-1));
@@ -547,6 +555,7 @@ reg_t processor_t::get_csr(int which)
     case CSR_MSCRATCH: return state.mscratch;
     case CSR_MCAUSE: return state.mcause;
     case CSR_MBADADDR: return state.mbadaddr;
+    case CSR_MTIMECMP: return state.mtimecmp;
     case CSR_MCPUID: return cpuid;
     case CSR_MIMPID: return IMPL_ROCKET;
     case CSR_MHARTID: return id;

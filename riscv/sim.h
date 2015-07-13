@@ -45,8 +45,11 @@ private:
   mmu_t* debug_mmu;  // debug port into main memory
   std::vector<processor_t*> procs;
 
+  processor_t* get_core(const std::string& i);
   void step(size_t n); // step through simulation
   static const size_t INTERLEAVE = 5000;
+  static const size_t INSNS_PER_RTC_TICK = 100; // 10 MHz clock for 1 BIPS core
+  reg_t rtc;
   size_t current_step;
   size_t current_proc;
   bool debug;
@@ -56,6 +59,7 @@ private:
   void interactive();
 
   // functions that help implement interactive()
+  void interactive_help(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_quit(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_run(const std::string& cmd, const std::vector<std::string>& args, bool noisy);
   void interactive_run_noisy(const std::string& cmd, const std::vector<std::string>& args);
@@ -63,6 +67,7 @@ private:
   void interactive_reg(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_fregs(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_fregd(const std::string& cmd, const std::vector<std::string>& args);
+  void interactive_pc(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_mem(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_str(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_until(const std::string& cmd, const std::vector<std::string>& args);

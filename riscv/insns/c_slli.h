@@ -1,4 +1,3 @@
 require_extension('C');
-if (insn.rvc_imm() >= xlen)
-  throw trap_illegal_instruction();
-WRITE_RD(sext_xlen(RVC_RS2 << insn.rvc_imm()));
+require(insn.rvc_imm() < xlen);
+WRITE_RD(sext_xlen(RVC_RS1 << insn.rvc_imm()));

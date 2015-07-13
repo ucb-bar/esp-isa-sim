@@ -18,6 +18,15 @@
 #include <vector>
 #include <algorithm>
 
+processor_t *sim_t::get_core(const std::string& i)
+{
+  char *ptr;
+  unsigned long p = strtoul(i.c_str(), &ptr, 10);
+  if (*ptr || p >= num_cores())
+    throw trap_illegal_instruction();
+  return get_core(p);
+}
+
 static std::string readline(int fd)
 {
   struct termios tios;
@@ -48,6 +57,25 @@ static std::string readline(int fd)
 
 void sim_t::interactive()
 {
+  typedef void (sim_t::*interactive_func)(const std::string&, const std::vector<std::string>&);
+  std::map<std::string,interactive_func> funcs;
+
+  funcs["run"] = &sim_t::interactive_run_noisy;
+  funcs["r"] = funcs["run"];
+  funcs["rs"] = &sim_t::interactive_run_silent;
+  funcs["reg"] = &sim_t::interactive_reg;
+  funcs["fregs"] = &sim_t::interactive_fregs;
+  funcs["fregd"] = &sim_t::interactive_fregd;
+  funcs["pc"] = &sim_t::interactive_pc;
+  funcs["mem"] = &sim_t::interactive_mem;
+  funcs["str"] = &sim_t::interactive_str;
+  funcs["until"] = &sim_t::interactive_until;
+  funcs["while"] = &sim_t::interactive_until;
+  funcs["quit"] = &sim_t::interactive_quit;
+  funcs["q"] = funcs["quit"];
+  funcs["help"] = &sim_t::interactive_help;
+  funcs["h"] = funcs["help"];
+
   while (!htif->done())
   {
     std::cerr << ": " << std::flush;
@@ -67,20 +95,6 @@ void sim_t::interactive()
     while (ss >> tmp)
       args.push_back(tmp);
 
-    typedef void (sim_t::*interactive_func)(const std::string&, const std::vector<std::string>&);
-    std::map<std::string,interactive_func> funcs;
-
-    funcs["r"] = &sim_t::interactive_run_noisy;
-    funcs["rs"] = &sim_t::interactive_run_silent;
-    funcs["reg"] = &sim_t::interactive_reg;
-    funcs["fregs"] = &sim_t::interactive_fregs;
-    funcs["fregd"] = &sim_t::interactive_fregd;
-    funcs["mem"] = &sim_t::interactive_mem;
-    funcs["str"] = &sim_t::interactive_str;
-    funcs["until"] = &sim_t::interactive_until;
-    funcs["while"] = &sim_t::interactive_until;
-    funcs["q"] = &sim_t::interactive_quit;
-
     try
     {
       if(funcs.count(cmd))
@@ -89,6 +103,33 @@ void sim_t::interactive()
     catch(trap_t t) {}
   }
   ctrlc_pressed = false;
+}
+
+void sim_t::interactive_help(const std::string& cmd, const std::vector<std::string>& args)
+{
+  std::cerr <<
+    "Interactive commands:\n"
+    "reg <core> [reg]                # Display [reg] (all if omitted) in <core>\n"
+    "fregs <core> <reg>              # Display single precision <reg> in <core>\n"
+    "fregd <core> <reg>              # Display double precision <reg> in <core>\n"
+    "pc <core>                       # Show current PC in <core>\n"
+    "mem <hex addr>                  # Show contents of physical memory\n"
+    "str <hex addr>                  # Show NUL-terminated C string\n"
+    "until reg <core> <reg> <val>    # Stop when <reg> in <core> hits <val>\n"
+    "until pc <core> <val>           # Stop when PC in <core> hits <val>\n"
+    "until mem <addr> <val>          # Stop when memory <addr> becomes <val>\n"
+    "while reg <core> <reg> <val>    # Run while <reg> in <core> is <val>\n"
+    "while pc <core> <val>           # Run while PC in <core> is <val>\n"
+    "while mem <addr> <val>          # Run while memory <addr> is <val>\n"
+    "run [count]                     # Resume noisy execution (until CTRL+C, or [count] insns)\n"
+    "r [count]                         Alias for run\n"
+    "rs [count]                      # Resume silent execution (until CTRL+C, or [count] insns)\n"
+    "quit                            # End the simulation\n"
+    "q                                 Alias for quit\n"
+    "help                            # This screen!\n"
+    "h                                 Alias for help\n"
+    "Note: Hitting enter is the same as: run 1\n"
+    << std::flush;
 }
 
 void sim_t::interactive_run_noisy(const std::string& cmd, const std::vector<std::string>& args)
@@ -120,11 +161,13 @@ reg_t sim_t::get_pc(const std::vector<std::string>& args)
   if(args.size() != 1)
     throw trap_illegal_instruction();
 
-  int p = atoi(args[0].c_str());
-  if(p >= (int)num_cores())
-    throw trap_illegal_instruction();
+  processor_t *p = get_core(args[0]);
+  return p->state.pc;
+}
 
-  return procs[p]->state.pc;
+void sim_t::interactive_pc(const std::string& cmd, const std::vector<std::string>& args)
+{
+  fprintf(stderr, "0x%016" PRIx64 "\n", get_pc(args));
 }
 
 reg_t sim_t::get_reg(const std::vector<std::string>& args)
@@ -132,16 +175,14 @@ reg_t sim_t::get_reg(const std::vector<std::string>& args)
   if(args.size() != 2)
     throw trap_illegal_instruction();
 
-  char* ptr;
-  unsigned long p = strtoul(args[0].c_str(), &ptr, 10);
-  if (*ptr || p >= num_cores())
-    throw trap_illegal_instruction();
+  processor_t *p = get_core(args[0]);
 
   unsigned long r = std::find(xpr_name, xpr_name + NXPR, args[1]) - xpr_name;
   if (r == NXPR) {
+    char *ptr;
     r = strtoul(args[1].c_str(), &ptr, 10);
     if (*ptr) {
-      #define DECLARE_CSR(name, number) if (args[1] == #name) return procs[p]->get_csr(number);
+      #define DECLARE_CSR(name, number) if (args[1] == #name) return p->get_csr(number);
       if (0) ;
       #include "encoding.h"
       else r = NXPR;
@@ -152,7 +193,7 @@ reg_t sim_t::get_reg(const std::vector<std::string>& args)
   if (r >= NXPR)
     throw trap_illegal_instruction();
 
-  return procs[p]->state.XPR[r];
+  return p->state.XPR[r];
 }
 
 reg_t sim_t::get_freg(const std::vector<std::string>& args)
@@ -160,19 +201,29 @@ reg_t sim_t::get_freg(const std::vector<std::string>& args)
   if(args.size() != 2)
     throw trap_illegal_instruction();
 
-  int p = atoi(args[0].c_str());
+  processor_t *p = get_core(args[0]);
   int r = std::find(fpr_name, fpr_name + NFPR, args[1]) - fpr_name;
   if (r == NFPR)
     r = atoi(args[1].c_str());
-  if(p >= (int)num_cores() || r >= NFPR)
+  if (r >= NFPR)
     throw trap_illegal_instruction();
 
-  return procs[p]->state.FPR[r];
+  return p->state.FPR[r];
 }
 
 void sim_t::interactive_reg(const std::string& cmd, const std::vector<std::string>& args)
 {
-  fprintf(stderr, "0x%016" PRIx64 "\n", get_reg(args));
+  if (args.size() == 1) {
+    // Show all the regs!
+    processor_t *p = get_core(args[0]);
+
+    for (int r = 0; r < NFPR; ++r) {
+      fprintf(stderr, "%-4s: 0x%016" PRIx64 "  ", xpr_name[r], p->state.XPR[r]);
+      if ((r + 1) % 4 == 0)
+        fprintf(stderr, "\n");
+    }
+  } else
+    fprintf(stderr, "0x%016" PRIx64 "\n", get_reg(args));
 }
 
 union fpr
@@ -205,10 +256,8 @@ reg_t sim_t::get_mem(const std::vector<std::string>& args)
   mmu_t* mmu = debug_mmu;
   if(args.size() == 2)
   {
-    int p = atoi(args[0].c_str());
-    if(p >= (int)num_cores())
-      throw trap_illegal_instruction();
-    mmu = procs[p]->get_mmu();
+    processor_t *p = get_core(args[0]);
+    mmu = p->get_mmu();
     addr_str = args[1];
   }
 
