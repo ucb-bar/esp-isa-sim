@@ -119,10 +119,12 @@ static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
   VEC_UT_SEG_ST_LOAD(dst, func, INSN_VSEG*inc, inc)
 
 #define VEC_UT_SEG_ST_LOAD(dst, func, stride, inc) \
-  reg_t addr = ARS1+stride*UTIDX; \
-  for (uint32_t j=0; j<INSN_VSEG; j++) { \
-    UT_WRITE_##dst(UTIDX, INSN_VRD+j, p->get_mmu()->func(addr)); \
-    addr += inc; \
+  if(VPRED) { \
+    reg_t addr = ARS1+stride*UTIDX; \
+    for (uint32_t j=0; j<INSN_VSEG; j++) { \
+      UT_WRITE_##dst(UTIDX, INSN_VRD+j, p->get_mmu()->func(addr)); \
+      addr += inc; \
+    } \
   } \
 
 
@@ -133,10 +135,12 @@ static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
   VEC_UT_SEG_ST_STORE(src, func, INSN_VSEG*inc, inc)
 
 #define VEC_UT_SEG_ST_STORE(src, func, stride, inc) \
-  reg_t addr = ARS1+stride*UTIDX; \
-  for (uint32_t j=0; j<INSN_VSEG; j++) { \
-    p->get_mmu()->func(addr, UT_READ_##src(UTIDX, INSN_VRD+j)); \
-    addr += inc; \
+  if(VPRED) { \
+    reg_t addr = ARS1+stride*UTIDX; \
+    for (uint32_t j=0; j<INSN_VSEG; j++) { \
+      p->get_mmu()->func(addr, UT_READ_##src(UTIDX, INSN_VRD+j)); \
+      addr += inc; \
+    } \
   } \
 
 #endif
