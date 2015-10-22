@@ -8,7 +8,5 @@ if (nxpr < 2)
 else
   maxvl = 8 * (256 / nxpr);
 WRITE_MAXVL(maxvl);
-for(uint32_t i=0; i<maxvl; i++)
-  WRITE_PPR_NO_PRED(i,0,1);
 WRITE_VL(0);
 WRITE_ENABLE(true);
