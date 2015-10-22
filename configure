@@ -666,6 +666,7 @@ enable_optional_subprojects
 with_fesvr
 enable_commitlog
 enable_histogram
+enable_hcommitlog
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1299,6 +1300,7 @@ Optional Features:
                           Enable all optional subprojects
   --enable-commitlog      Enable commit log generation
   --enable-histogram      Enable PC histogram generation
+  --enable-hcommitlog     Enable Hwacha commit log generation
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -4211,6 +4213,19 @@ $as_echo "$as_me: configuring default subproject : hwacha" >&6;}
       subprojects_enabled="$subprojects_enabled hwacha"
 
 $as_echo "#define HWACHA_ENABLED /**/" >>confdefs.h
+
+      # Check whether --enable-hcommitlog was given.
+if test "${enable_hcommitlog+set}" = set; then :
+  enableval=$enable_hcommitlog;
+fi
+
+if test "x$enable_hcommitlog" = "xyes"; then :
+
+
+$as_echo "#define RISCV_ENABLE_HCOMMITLOG /**/" >>confdefs.h
+
+
+fi
 
 
 

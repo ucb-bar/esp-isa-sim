@@ -36,6 +36,9 @@
 /* Enable commit log generation */
 #undef RISCV_ENABLE_COMMITLOG
 
+/* Enable Hwacha commit log generation */
+#undef RISCV_ENABLE_HCOMMITLOG
+
 /* Enable PC histogram generation */
 #undef RISCV_ENABLE_HISTOGRAM
 

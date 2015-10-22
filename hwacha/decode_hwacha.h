@@ -58,6 +58,9 @@ static inline void write_spr(hwacha_t* h, insn_t insn, size_t dst, reg_t value)
 {
   if (dst >= 256)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
+#ifdef RISCV_ENABLE_HCOMMITLOG
+  printf("H: write_srf %ld %016lx\n", dst, value);
+#endif
   h->get_ct_state()->SPR.write(dst, value);
 }
 
@@ -84,6 +87,9 @@ static inline void write_apr(hwacha_t* h, insn_t insn, size_t dst, reg_t value)
 {
   if (dst >= 32)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
+#ifdef RISCV_ENABLE_HCOMMITLOG
+  printf("H: write_arf %ld %016lx\n", dst, value);
+#endif
   h->get_ct_state()->APR.write(dst, value);
 }
 
@@ -148,8 +154,12 @@ static inline void write_ppr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst,
 {
   if (dst >= h->get_ct_state()->nppr)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
-  if(pred || VPRED)
+  if (pred || VPRED) {
     h->get_ut_state(idx)->PPR.write(dst, value);
+#ifdef RISCV_ENABLE_HCOMMITLOG
+    printf("H: write_prf %d %ld %d\n", idx, dst, value);
+#endif
+  }
 }
 
 #define WRITE_PPR_NO_PRED(idx,dst,value) write_ppr(h, insn, idx, dst, value, 1)
@@ -176,6 +186,9 @@ static inline void write_xpr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst,
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
   if(pred || VPRED){
     h->get_ut_state(idx)->XPR.write(dst, value);
+#ifdef RISCV_ENABLE_HCOMMITLOG
+    printf("H: write_vrf %d %ld %016lx\n", idx, dst, value);
+#endif
   }
 }
 
