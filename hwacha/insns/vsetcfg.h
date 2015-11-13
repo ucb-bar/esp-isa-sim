@@ -1,5 +1,5 @@
-uint32_t nxpr = (XS1 & 0xff) + (insn.i_imm() & 0xff) + 1;
-uint32_t nppr = ((XS1 >> 8) & 0xf) + ((insn.i_imm() >> 8) & 0xf) + 1;
+uint32_t nxpr = (XS1 & 0x1ff) | (insn.i_imm() & 0x1ff);
+uint32_t nppr = ((XS1 >> 9) & 0x1f) | ((insn.i_imm() >> 9) & 0x1f);
 WRITE_NXPR(nxpr);
 WRITE_NPPR(nppr);
 uint32_t maxvl_xpr, maxvl_ppr;
