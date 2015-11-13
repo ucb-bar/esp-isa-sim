@@ -1,4 +1,4 @@
 require_fp;
 softfloat_roundingMode = VRM;
-WRITE_FRD(f32_sqrt(FRS1));
+WRITE_SFRD(f32_sqrt(FRS1));
 set_fp_exceptions;

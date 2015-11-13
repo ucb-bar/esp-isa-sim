@@ -1,3 +1,3 @@
 require_fp;
-WRITE_FRD(HFRS1);
+WRITE_SFRD(HFRS1);
 set_fp_exceptions;

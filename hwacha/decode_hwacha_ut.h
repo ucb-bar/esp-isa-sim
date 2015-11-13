@@ -108,6 +108,7 @@ static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
 #define HFRS2 cvt_hs(FRS2)
 #define HFRS3 cvt_hs(FRS3)
 
+#define WRITE_SFRD(value) WRITE_RD(((sreg_t)(-1)<<32) | (value))
 #define WRITE_HFRD(value) write_rd(h, insn, UTIDX, cvt_sh(value, RM))
 
 #define sext16(x) ((sreg_t)(int16_t)(x))
