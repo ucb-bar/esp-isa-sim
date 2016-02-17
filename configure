@@ -4397,9 +4397,9 @@ ac_config_files="$ac_config_files riscv-spike.pc"
 
 ac_config_files="$ac_config_files riscv-riscv.pc"
 
-ac_config_files="$ac_config_files riscv-hwacha.pc"
-
 ac_config_files="$ac_config_files riscv-softfloat.pc"
+
+ac_config_files="$ac_config_files riscv-hwacha.pc"
 
 ac_config_files="$ac_config_files riscv-dummy_rocc.pc"
 
@@ -5104,8 +5104,8 @@ do
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
     "riscv-spike.pc") CONFIG_FILES="$CONFIG_FILES riscv-spike.pc" ;;
     "riscv-riscv.pc") CONFIG_FILES="$CONFIG_FILES riscv-riscv.pc" ;;
-    "riscv-hwacha.pc") CONFIG_FILES="$CONFIG_FILES riscv-hwacha.pc" ;;
     "riscv-softfloat.pc") CONFIG_FILES="$CONFIG_FILES riscv-softfloat.pc" ;;
+    "riscv-hwacha.pc") CONFIG_FILES="$CONFIG_FILES riscv-hwacha.pc" ;;
     "riscv-dummy_rocc.pc") CONFIG_FILES="$CONFIG_FILES riscv-dummy_rocc.pc" ;;
     "riscv-spike_main.pc") CONFIG_FILES="$CONFIG_FILES riscv-spike_main.pc" ;;
 

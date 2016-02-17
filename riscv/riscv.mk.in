@@ -40,6 +40,7 @@ riscv_srcs = \
 	extensions.cc \
 	rocc.cc \
 	regnames.cc \
+	devices.cc \
 	$(riscv_gen_srcs) \
 
 riscv_test_srcs =
@@ -81,11 +82,11 @@ riscv_insn_list = \
 	bltu \
 	bne \
 	c_add \
-	c_addi16sp \
 	c_addi4spn \
 	c_addi \
-	c_addiw \
 	c_addw \
+	c_and \
+	c_andi \
 	c_beqz \
 	c_bnez \
 	c_ebreak \
@@ -106,7 +107,13 @@ riscv_insn_list = \
 	c_lw \
 	c_lwsp \
 	c_mv \
+	c_or \
 	c_slli \
+	c_srai \
+	c_srli \
+	c_sub \
+	c_subw \
+	c_xor \
 	csrrc \
 	csrrci \
 	csrrs \
