@@ -546,12 +546,15 @@ const disasm_insn_t* disassembler_t::lookup(insn_t insn)
   return NULL;
 }
 
-void disassembler_t::add_insn(disasm_insn_t* insn)
+void disassembler_t::add_insn(disasm_insn_t* insn, bool priority)
 {
   size_t idx = HASH_SIZE;
   if (insn->get_mask() % HASH_SIZE == HASH_SIZE - 1)
     idx = insn->get_match() % HASH_SIZE;
-  chain[idx].push_back(insn);
+  if(priority)
+    chain[idx].insert(chain[idx].begin(), insn);
+  else
+    chain[idx].push_back(insn);
 }
 
 disassembler_t::~disassembler_t()

@@ -63,7 +63,7 @@ class disassembler_t
   disassembler_t();
   ~disassembler_t();
   std::string disassemble(insn_t insn);
-  void add_insn(disasm_insn_t* insn);
+  void add_insn(disasm_insn_t* insn, bool priority = false);
  private:
   static const int HASH_SIZE = 256;
   std::vector<const disasm_insn_t*> chain[HASH_SIZE+1];
