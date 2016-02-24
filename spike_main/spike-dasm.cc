@@ -26,7 +26,7 @@ int main(int argc, char** argv)
 
   if (extension) {
     for (auto disasm_insn : extension()->get_disasms())
-      d.add_insn(disasm_insn);
+      d.add_insn(disasm_insn, true);
   }
 
   while (getline(cin, s))
