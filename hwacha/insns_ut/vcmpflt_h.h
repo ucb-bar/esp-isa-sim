@@ -1,3 +1,3 @@
 require_fp;
-WRITE_PRD(f32_lt(HFRS1, HFRS2));
+WRITE_PRD(f32_lt(f32(HFRS1), f32(HFRS2)));
 set_fp_exceptions;

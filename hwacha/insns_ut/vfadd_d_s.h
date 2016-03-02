@@ -1,3 +1,3 @@
 softfloat_roundingMode = VRM;
-WRITE_FRD(f64_mulAdd(f32_to_f64(FRS1), 0x3ff0000000000000ULL, f32_to_f64(FRS2)));
+WRITE_FRD(f64_add(f32_to_f64(f32(FRS1)), f32_to_f64(f32(FRS2))).v);
 set_fp_exceptions;

@@ -1,3 +1,3 @@
 require_fp;
-WRITE_HFRD(FRS1);
+WRITE_HFRD(f32(FRS1).v);
 set_fp_exceptions;

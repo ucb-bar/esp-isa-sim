@@ -1,4 +1,4 @@
 require_fp;
 softfloat_roundingMode = VRM;
-WRITE_HFRD(f32_div(HFRS1, HFRS2));
+WRITE_HFRD(f32_div(f32(HFRS1), f32(HFRS2)).v);
 set_fp_exceptions;
