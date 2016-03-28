@@ -41,6 +41,7 @@ struct state_t
   regfile_t<freg_t, NFPR, false> FPR;
 
   // control and status registers
+  reg_t prv;
   reg_t mstatus;
   reg_t mepc;
   reg_t mbadaddr;
@@ -50,14 +51,16 @@ struct state_t
   reg_t minstret;
   reg_t mie;
   reg_t mip;
+  reg_t medeleg;
+  reg_t mideleg;
+  reg_t mucounteren;
+  reg_t mscounteren;
   reg_t sepc;
   reg_t sbadaddr;
   reg_t sscratch;
   reg_t stvec;
   reg_t sptbr;
   reg_t scause;
-  reg_t sutime_delta;
-  reg_t suinstret_delta;
   reg_t tohost;
   reg_t fromhost;
   uint32_t fflags;
@@ -89,13 +92,13 @@ public:
   reg_t get_csr(int which);
   mmu_t* get_mmu() { return mmu; }
   state_t* get_state() { return &state; }
+  unsigned get_max_xlen() { return max_xlen; }
   extension_t* get_extension() { return ext; }
   bool supports_extension(unsigned char ext) {
     if (ext >= 'a' && ext <= 'z') ext += 'A' - 'a';
-    return ext >= 'A' && ext <= 'Z' && ((cpuid >> (ext - 'A')) & 1);
+    return ext >= 'A' && ext <= 'Z' && ((isa >> (ext - 'A')) & 1);
   }
-  void push_privilege_stack();
-  void pop_privilege_stack();
+  void set_privilege(reg_t);
   void yield_load_reservation() { state.load_reservation = (reg_t)-1; }
   void update_histogram(reg_t pc);
 
@@ -112,11 +115,11 @@ private:
   extension_t* ext;
   disassembler_t* disassembler;
   state_t state;
-  reg_t cpuid;
   uint32_t id;
-  int max_xlen;
-  int xlen;
-  std::string isa;
+  unsigned max_xlen;
+  unsigned xlen;
+  reg_t isa;
+  std::string isa_string;
   bool run; // !reset
   bool debug;
   bool histogram_enabled;

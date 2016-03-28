@@ -8,7 +8,7 @@
 static void commit_log_stash_privilege(state_t* state)
 {
 #ifdef RISCV_ENABLE_COMMITLOG
-  state->last_inst_priv = get_field(state->mstatus, MSTATUS_PRV);
+  state->last_inst_priv = state->prv;
 #endif
 }
 
@@ -43,7 +43,7 @@ static reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
 {
   commit_log_stash_privilege(p->get_state());
   reg_t npc = fetch.func(p, fetch.insn, pc);
-  if (npc != PC_SERIALIZE) {
+  if (!invalid_pc(npc)) {
     commit_log_print_insn(p->get_state(), pc, fetch.insn);
     p->update_histogram(pc);
   }
@@ -59,9 +59,13 @@ void processor_t::step(size_t n)
     mmu_t* _mmu = mmu;
 
     #define advance_pc() \
-     if (unlikely(pc == PC_SERIALIZE)) { \
+     if (unlikely(invalid_pc(pc))) { \
+       switch (pc) { \
+         case PC_SERIALIZE_BEFORE: state.serialized = true; break; \
+         case PC_SERIALIZE_AFTER: instret++; break; \
+         default: abort(); \
+       } \
        pc = state.pc; \
-       state.serialized = true; \
        break; \
      } else { \
        state.pc = pc; \
@@ -70,7 +74,6 @@ void processor_t::step(size_t n)
 
     try
     {
-      check_timer();
       take_interrupt();
 
       if (unlikely(debug))
@@ -117,6 +120,7 @@ miss:
     catch(trap_t& t)
     {
       take_trap(t, pc);
+      n = instret;
     }
 
     state.minstret += instret;

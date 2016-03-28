@@ -55,6 +55,10 @@ public:
   const char* name() { return "hwacha"; }
   void reset();
   void set_debug(bool value) { debug = value; }
+  void set_processor(processor_t* _p) {
+    if(_p->get_max_xlen() != 64) throw std::logic_error("hwacha requires rv64");
+    p = _p;
+  }
 
   ct_state_t* get_ct_state() { return &ct_state; }
   ut_state_t* get_ut_state(int idx) { return &ut_state[idx]; }

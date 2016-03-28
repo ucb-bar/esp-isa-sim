@@ -18,7 +18,7 @@ class extension_t
   virtual void set_debug(bool value) {};
   virtual ~extension_t();
 
-  void set_processor(processor_t* _p) { p = _p; }
+  virtual void set_processor(processor_t* _p) { p = _p; }
  protected:
   processor_t* p;
 

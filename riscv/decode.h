@@ -220,7 +220,7 @@ private:
 #define set_field(reg, mask, val) (((reg) & ~(decltype(reg))(mask)) | (((decltype(reg))(val) * ((mask) & ~((mask) << 1))) & (decltype(reg))(mask)))
 
 #define require(x) if (unlikely(!(x))) throw trap_illegal_instruction()
-#define require_privilege(p) require(get_field(STATE.mstatus, MSTATUS_PRV) >= (p))
+#define require_privilege(p) require(STATE.prv >= (p))
 #define require_rv64 require(xlen == 64)
 #define require_rv32 require(xlen == 32)
 #define require_extension(s) require(p->supports_extension(s))
@@ -241,19 +241,27 @@ private:
        npc = sext_xlen(x); \
      } while(0)
 
-#define PC_SERIALIZE 3 /* sentinel value indicating simulator pipeline flush */
+#define set_pc_and_serialize(x) \
+  do { set_pc(x); /* check alignment */ \
+       npc = PC_SERIALIZE_AFTER; \
+       STATE.pc = (x); \
+     } while(0)
+
+/* Sentinel PC values to serialize simulator pipeline */
+#define PC_SERIALIZE_BEFORE 3
+#define PC_SERIALIZE_AFTER 5
+#define invalid_pc(pc) ((pc) & 1)
 
 /* Convenience wrappers to simplify softfloat code sequences */
 #define f32(x) ((float32_t){(uint32_t)x})
 #define f64(x) ((float64_t){(uint64_t)x})
 
 #define validate_csr(which, write) ({ \
-  if (!STATE.serialized) return PC_SERIALIZE; \
+  if (!STATE.serialized) return PC_SERIALIZE_BEFORE; \
   STATE.serialized = false; \
-  unsigned my_priv = get_field(STATE.mstatus, MSTATUS_PRV); \
   unsigned csr_priv = get_field((which), 0x300); \
   unsigned csr_read_only = get_field((which), 0xC00) == 3; \
-  if (((write) && csr_read_only) || my_priv < csr_priv) \
+  if (((write) && csr_read_only) || STATE.prv < csr_priv) \
     throw trap_illegal_instruction(); \
   (which); })
 

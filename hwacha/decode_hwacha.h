@@ -202,7 +202,7 @@ static inline void write_xpr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst,
 
 
 #define require_supervisor_hwacha \
-  if (get_field(p->get_state()->mstatus, MSTATUS_PRV) < PRV_S) \
+  if (p->get_state()->prv < PRV_S) \
     h->take_exception(HWACHA_CAUSE_PRIVILEGED_INSTRUCTION, uint32_t(insn.bits()));
 
 #endif

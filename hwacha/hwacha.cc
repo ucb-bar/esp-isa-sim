@@ -80,19 +80,19 @@ static reg_t custom(processor_t* p, insn_t insn, reg_t pc)
   }
   catch (trap_load_address_misaligned& t)
   {
-    h->take_exception(HWACHA_CAUSE_MISALIGNED_LOAD, t.get_badvaddr());
+    h->take_exception(HWACHA_CAUSE_MISALIGNED_LOAD, t.get_badaddr());
   }
   catch (trap_store_address_misaligned& t)
   {
-    h->take_exception(HWACHA_CAUSE_MISALIGNED_STORE, t.get_badvaddr());
+    h->take_exception(HWACHA_CAUSE_MISALIGNED_STORE, t.get_badaddr());
   }
   catch (trap_load_access_fault& t)
   {
-    h->take_exception(HWACHA_CAUSE_FAULT_LOAD, t.get_badvaddr());
+    h->take_exception(HWACHA_CAUSE_FAULT_LOAD, t.get_badaddr());
   }
   catch (trap_store_access_fault& t)
   {
-    h->take_exception(HWACHA_CAUSE_FAULT_STORE, t.get_badvaddr());
+    h->take_exception(HWACHA_CAUSE_FAULT_STORE, t.get_badaddr());
   }
 
   if (!matched)
