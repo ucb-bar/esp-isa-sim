@@ -1,6 +1,7 @@
 // See LICENSE for license details.
 
 #include "sim.h"
+#include "mmu.h"
 #include "htif.h"
 #include <map>
 #include <iostream>
@@ -22,7 +23,7 @@ static void handle_signal(int sig)
 sim_t::sim_t(const char* isa, size_t nprocs, size_t mem_mb,
              const std::vector<std::string>& args)
   : htif(new htif_isasim_t(this, args)), procs(std::max(nprocs, size_t(1))),
-    rtc(0), current_step(0), current_proc(0), debug(false)
+    current_step(0), current_proc(0), debug(false)
 {
   signal(SIGINT, &handle_signal);
   // allocate target machine's memory, shrinking it as necessary
@@ -40,11 +41,12 @@ sim_t::sim_t(const char* isa, size_t nprocs, size_t mem_mb,
     fprintf(stderr, "warning: only got %lu bytes of target mem (wanted %lu)\n",
             (unsigned long)memsz, (unsigned long)memsz0);
 
-  debug_mmu = new mmu_t(mem, memsz);
+  debug_mmu = new mmu_t(this, NULL);
 
   for (size_t i = 0; i < procs.size(); i++)
     procs[i] = new processor_t(isa, this, i);
 
+  rtc.reset(new rtc_t(procs));
   make_config_string();
 }
 
@@ -54,16 +56,6 @@ sim_t::~sim_t()
     delete procs[i];
   delete debug_mmu;
   free(mem);
-}
-
-reg_t sim_t::get_scr(int which)
-{
-  switch (which)
-  {
-    case 0: return procs.size();
-    case 1: return memsz >> 20;
-    default: return -1;
-  }
 }
 
 int sim_t::run()
@@ -94,7 +86,7 @@ void sim_t::step(size_t n)
       procs[current_proc]->yield_load_reservation();
       if (++current_proc == procs.size()) {
         current_proc = 0;
-        rtc += INTERLEAVE / INSNS_PER_RTC_TICK;
+        rtc->increment(INTERLEAVE / INSNS_PER_RTC_TICK);
       }
 
       htif->tick();
@@ -108,13 +100,6 @@ bool sim_t::running()
     if (procs[i]->running())
       return true;
   return false;
-}
-
-void sim_t::stop()
-{
-  procs[0]->state.tohost = 1;
-  while (htif->tick())
-    ;
 }
 
 void sim_t::set_debug(bool value)
@@ -157,9 +142,23 @@ bool sim_t::mmio_store(reg_t addr, size_t len, const uint8_t* bytes)
 
 void sim_t::make_config_string()
 {
-  size_t csr_size = NCSR * 16 /* RV128 */;
-  size_t device_tree_addr = memsz;
-  size_t cpu_addr = memsz + csr_size;
+  reg_t rtc_addr = EXT_IO_BASE;
+  bus.add_device(rtc_addr, rtc.get());
+
+  const int align = 0x1000;
+  reg_t cpu_addr = rtc_addr + ((rtc->size() - 1) / align + 1) * align;
+  reg_t cpu_size = align;
+
+  uint32_t reset_vec[8] = {
+    0x297 + DRAM_BASE - DEFAULT_RSTVEC, // reset vector
+    0x00028067,                         //   jump straight to DRAM_BASE
+    0x00000000,                         // reserved
+    0,                                  // config string pointer
+    0, 0, 0, 0                          // trap vector
+  };
+  reset_vec[3] = DEFAULT_RSTVEC + sizeof(reset_vec); // config string pointer
+
+  std::vector<char> rom((char*)reset_vec, (char*)reset_vec + sizeof(reset_vec));
 
   std::stringstream s;
   s << std::hex <<
@@ -167,9 +166,12 @@ void sim_t::make_config_string()
         "  vendor ucb;\n"
         "  arch spike;\n"
         "};\n"
+        "rtc {\n"
+        "  addr 0x" << rtc_addr << ";\n"
+        "};\n"
         "ram {\n"
         "  0 {\n"
-        "    addr 0;\n"
+        "    addr 0x" << DRAM_BASE << ";\n"
         "    size 0x" << memsz << ";\n"
         "  };\n"
         "};\n"
@@ -179,18 +181,19 @@ void sim_t::make_config_string()
         "  " << i << " {\n"
         "    " << "0 {\n" << // hart 0 on core i
         "      isa " << procs[i]->isa_string << ";\n"
-        "      addr 0x" << cpu_addr << ";\n"
+        "      timecmp 0x" << (rtc_addr + 8*(1+i)) << ";\n"
+        "      ipi 0x" << cpu_addr << ";\n"
         "    };\n"
         "  };\n";
     bus.add_device(cpu_addr, procs[i]);
-    cpu_addr += csr_size;
+    cpu_addr += cpu_size;
   }
   s <<  "};\n";
 
-  std::string str = s.str();
-  std::vector<char> vec(str.begin(), str.end());
-  vec.push_back(0);
-  assert(vec.size() <= csr_size);
-  config_string.reset(new rom_device_t(vec));
-  bus.add_device(memsz, config_string.get());
+  config_string = s.str();
+  rom.insert(rom.end(), config_string.begin(), config_string.end());
+  rom.resize((rom.size() / align + 1) * align);
+
+  boot_rom.reset(new rom_device_t(rom));
+  bus.add_device(DEFAULT_RSTVEC, boot_rom.get());
 }

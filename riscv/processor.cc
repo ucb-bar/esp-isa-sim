@@ -5,6 +5,7 @@
 #include "common.h"
 #include "config.h"
 #include "sim.h"
+#include "mmu.h"
 #include "htif.h"
 #include "disasm.h"
 #include <cinttypes>
@@ -25,8 +26,7 @@ processor_t::processor_t(const char* isa, sim_t* sim, uint32_t id)
 {
   parse_isa_string(isa);
 
-  mmu = new mmu_t(sim->mem, sim->memsz);
-  mmu->set_processor(this);
+  mmu = new mmu_t(sim, this);
 
   reset(true);
 
@@ -67,7 +67,7 @@ void processor_t::parse_isa_string(const char* str)
   isa = reg_t(2) << 62;
 
   if (strncmp(p, "rv32", 4) == 0)
-    max_xlen = 32, isa = 0, p += 4;
+    max_xlen = 32, isa = reg_t(1) << 30, p += 4;
   else if (strncmp(p, "rv64", 4) == 0)
     p += 4;
   else if (strncmp(p, "rv", 2) == 0)
@@ -105,11 +105,6 @@ void processor_t::parse_isa_string(const char* str)
   if (supports_extension('D') && !supports_extension('F'))
     bad_isa_string(str);
 
-  // if we have IMAFD, advertise G, too
-  if (supports_extension('I') && supports_extension('M') &&
-      supports_extension('A') && supports_extension('D'))
-    isa |= 1L << ('g' - 'a');
-
   // advertise support for supervisor and user modes
   isa |= 1L << ('s' - 'a');
   isa |= 1L << ('u' - 'a');
@@ -120,6 +115,7 @@ void state_t::reset()
   memset(this, 0, sizeof(*this));
   prv = PRV_M;
   pc = DEFAULT_RSTVEC;
+  mtvec = DEFAULT_MTVEC;
   load_reservation = -1;
 }
 
@@ -170,8 +166,6 @@ static int ctz(reg_t val)
 
 void processor_t::take_interrupt()
 {
-  check_timer();
-
   reg_t pending_interrupts = state.mip & state.mie;
 
   reg_t mie = get_field(state.mstatus, MSTATUS_MIE);
@@ -184,12 +178,6 @@ void processor_t::take_interrupt()
 
   if (enabled_interrupts)
     raise_interrupt(ctz(enabled_interrupts));
-}
-
-void processor_t::check_timer()
-{
-  if (sim->rtc >= state.mtimecmp)
-    state.mip |= MIP_MTIP;
 }
 
 static bool validate_priv(reg_t priv)
@@ -230,7 +218,7 @@ void processor_t::take_trap(trap_t& t, reg_t epc)
     set_csr(CSR_MSTATUS, s);
     set_privilege(PRV_S);
   } else {
-    state.pc = DEFAULT_MTVEC;
+    state.pc = state.mtvec;
     state.mcause = t.cause();
     state.mepc = epc;
     if (t.has_badaddr())
@@ -266,7 +254,7 @@ static bool validate_vm(int max_xlen, reg_t vm)
 void processor_t::set_csr(int which, reg_t val)
 {
   val = zext_xlen(val);
-  reg_t delegable_ints = MIP_SSIP | MIP_STIP | (1 << IRQ_HOST) | (1 << IRQ_COP);
+  reg_t delegable_ints = MIP_SSIP | MIP_STIP | (1 << IRQ_COP);
   reg_t all_ints = delegable_ints | MIP_MSIP | MIP_MTIP;
   switch (which)
   {
@@ -312,13 +300,10 @@ void processor_t::set_csr(int which, reg_t val)
       break;
     }
     case CSR_MIP: {
-      reg_t mask = MIP_SSIP | MIP_STIP | MIP_MSIP;
+      reg_t mask = MIP_SSIP | MIP_STIP;
       state.mip = (state.mip & ~mask) | (val & mask);
       break;
     }
-    case CSR_MIPI:
-      state.mip = set_field(state.mip, MIP_MSIP, val & 1);
-      break;
     case CSR_MIE:
       state.mie = (state.mie & ~all_ints) | (val & all_ints);
       break;
@@ -357,21 +342,10 @@ void processor_t::set_csr(int which, reg_t val)
     case CSR_SCAUSE: state.scause = val; break;
     case CSR_SBADADDR: state.sbadaddr = val; break;
     case CSR_MEPC: state.mepc = val; break;
+    case CSR_MTVEC: state.mtvec = val >> 2 << 2; break;
     case CSR_MSCRATCH: state.mscratch = val; break;
     case CSR_MCAUSE: state.mcause = val; break;
     case CSR_MBADADDR: state.mbadaddr = val; break;
-    case CSR_MTIMECMP:
-      state.mip &= ~MIP_MTIP;
-      state.mtimecmp = val;
-      break;
-    case CSR_MTOHOST:
-      if (state.tohost == 0)
-        state.tohost = val;
-      break;
-    case CSR_MFROMHOST:
-      state.mip = (state.mip & ~(1 << IRQ_HOST)) | (val ? (1 << IRQ_HOST) : 0);
-      state.fromhost = val;
-      break;
   }
 }
 
@@ -420,10 +394,8 @@ reg_t processor_t::get_csr(int which)
     case CSR_MSCYCLE_DELTAH: if (xlen > 32) break; else return 0;
     case CSR_MSTIME_DELTAH: if (xlen > 32) break; else return 0;
     case CSR_MSINSTRET_DELTAH: if (xlen > 32) break; else return 0;
-    case CSR_MTIME: return sim->rtc;
     case CSR_MCYCLE: return state.minstret;
     case CSR_MINSTRET: return state.minstret;
-    case CSR_MTIMEH: if (xlen > 32) break; else return sim->rtc >> 32;
     case CSR_MCYCLEH: if (xlen > 32) break; else return state.minstret >> 32;
     case CSR_MINSTRETH: if (xlen > 32) break; else return state.minstret >> 32;
     case CSR_SSTATUS: {
@@ -449,45 +421,19 @@ reg_t processor_t::get_csr(int which)
     case CSR_SSCRATCH: return state.sscratch;
     case CSR_MSTATUS: return state.mstatus;
     case CSR_MIP: return state.mip;
-    case CSR_MIPI: return 0;
     case CSR_MIE: return state.mie;
     case CSR_MEPC: return state.mepc;
     case CSR_MSCRATCH: return state.mscratch;
     case CSR_MCAUSE: return state.mcause;
     case CSR_MBADADDR: return state.mbadaddr;
-    case CSR_MTIMECMP: return state.mtimecmp;
     case CSR_MISA: return isa;
     case CSR_MARCHID: return 0;
     case CSR_MIMPID: return 0;
     case CSR_MVENDORID: return 0;
     case CSR_MHARTID: return id;
-    case CSR_MTVEC: return DEFAULT_MTVEC;
+    case CSR_MTVEC: return state.mtvec;
     case CSR_MEDELEG: return state.medeleg;
     case CSR_MIDELEG: return state.mideleg;
-    case CSR_MTOHOST:
-      sim->get_htif()->tick(); // not necessary, but faster
-      return state.tohost;
-    case CSR_MFROMHOST:
-      sim->get_htif()->tick(); // not necessary, but faster
-      return state.fromhost;
-    case CSR_MCFGADDR: return sim->memsz;
-    case CSR_UARCH0:
-    case CSR_UARCH1:
-    case CSR_UARCH2:
-    case CSR_UARCH3:
-    case CSR_UARCH4:
-    case CSR_UARCH5:
-    case CSR_UARCH6:
-    case CSR_UARCH7:
-    case CSR_UARCH8:
-    case CSR_UARCH9:
-    case CSR_UARCH10:
-    case CSR_UARCH11:
-    case CSR_UARCH12:
-    case CSR_UARCH13:
-    case CSR_UARCH14:
-    case CSR_UARCH15:
-      return 0;
   }
   throw trap_illegal_instruction();
 }
@@ -577,23 +523,20 @@ void processor_t::register_base_instructions()
 
 bool processor_t::load(reg_t addr, size_t len, uint8_t* bytes)
 {
-  try {
-    auto res = get_csr(addr / (max_xlen / 8));
-    memcpy(bytes, &res, len);
-    return true;
-  } catch (trap_illegal_instruction& t) {
-    return false;
-  }
+  return false;
 }
 
 bool processor_t::store(reg_t addr, size_t len, const uint8_t* bytes)
 {
-  try {
-    reg_t value = 0;
-    memcpy(&value, bytes, len);
-    set_csr(addr / (max_xlen / 8), value);
-    return true;
-  } catch (trap_illegal_instruction& t) {
-    return false;
+  switch (addr)
+  {
+    case 0:
+      state.mip &= ~MIP_MSIP;
+      if (bytes[0] & 1)
+        state.mip |= MIP_MSIP;
+      return true;
+
+    default:
+      return false;
   }
 }

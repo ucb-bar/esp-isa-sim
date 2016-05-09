@@ -2,6 +2,7 @@
 
 #include "htif.h"
 #include "sim.h"
+#include "mmu.h"
 #include "encoding.h"
 #include <unistd.h>
 #include <stdexcept>
@@ -46,17 +47,30 @@ void htif_isasim_t::tick_once()
       send(&ack, sizeof(ack));
 
       uint64_t buf[hdr.data_size];
-      for (size_t i = 0; i < hdr.data_size; i++)
-        buf[i] = sim->debug_mmu->load_uint64((hdr.addr+i)*HTIF_DATA_ALIGN);
+      for (size_t i = 0; i < hdr.data_size; i++) {
+        reg_t addr = (hdr.addr + i) * HTIF_DATA_ALIGN;
+        try {
+          buf[i] = sim->debug_mmu->load_uint64(addr);
+        } catch (trap_load_access_fault& e) {
+          fprintf(stderr, "HTIF: attempt to read from illegal address 0x%" PRIx64 "\n", addr);
+          exit(-1);
+        }
+      }
       send(buf, hdr.data_size * sizeof(buf[0]));
       break;
     }
     case HTIF_CMD_WRITE_MEM:
     {
       const uint64_t* buf = (const uint64_t*)p.get_payload();
-      for (size_t i = 0; i < hdr.data_size; i++)
-        sim->debug_mmu->store_uint64((hdr.addr+i)*HTIF_DATA_ALIGN, buf[i]);
-
+      for (size_t i = 0; i < hdr.data_size; i++) {
+        reg_t addr = (hdr.addr + i) * HTIF_DATA_ALIGN;
+        try {
+          sim->debug_mmu->store_uint64(addr, buf[i]);
+        } catch (trap_load_access_fault& e) {
+          fprintf(stderr, "HTIF: attempt to write to illegal address 0x%" PRIx64 "\n", addr);
+          exit(-1);
+        }
+      }
       packet_header_t ack(HTIF_CMD_ACK, seqno, 0, 0);
       send(&ack, sizeof(ack));
       break;
@@ -72,13 +86,6 @@ void htif_isasim_t::tick_once()
       packet_header_t ack(HTIF_CMD_ACK, seqno, 1, 0);
       send(&ack, sizeof(ack));
 
-      if (coreid == 0xFFFFF) // system control register space
-      {
-        uint64_t scr = sim->get_scr(regno);
-        send(&scr, sizeof(scr));
-        break;
-      }
-
       processor_t* proc = sim->get_core(coreid);
       bool write = hdr.cmd == HTIF_CMD_WRITE_CONTROL_REG;
       if (write)
@@ -86,16 +93,6 @@ void htif_isasim_t::tick_once()
 
       switch (regno)
       {
-        case CSR_MTOHOST:
-          old_val = proc->get_state()->tohost;
-          if (write)
-            proc->get_state()->tohost = new_val;
-          break;
-        case CSR_MFROMHOST:
-          old_val = proc->get_state()->fromhost;
-          if (write && old_val == 0)
-            proc->set_csr(CSR_MFROMHOST, new_val);
-          break;
         case CSR_MRESET:
           old_val = !proc->running();
           if (write)

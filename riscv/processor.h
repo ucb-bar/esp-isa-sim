@@ -45,8 +45,8 @@ struct state_t
   reg_t mstatus;
   reg_t mepc;
   reg_t mbadaddr;
-  reg_t mtimecmp;
   reg_t mscratch;
+  reg_t mtvec;
   reg_t mcause;
   reg_t minstret;
   reg_t mie;
@@ -61,8 +61,6 @@ struct state_t
   reg_t stvec;
   reg_t sptbr;
   reg_t scause;
-  reg_t tohost;
-  reg_t fromhost;
   uint32_t fflags;
   uint32_t frm;
   bool serialized; // whether timer CSRs are in a well-defined state
@@ -137,6 +135,7 @@ private:
 
   friend class sim_t;
   friend class mmu_t;
+  friend class rtc_t;
   friend class extension_t;
 
   void parse_isa_string(const char* isa);
