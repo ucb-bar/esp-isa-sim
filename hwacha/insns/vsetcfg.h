@@ -6,9 +6,12 @@ WRITE_NPPR(nppr);
 uint32_t maxvl_xpr, maxvl_ppr;
 if (nxpr < 2) maxvl_xpr = 8 * 256;
 else maxvl_xpr = 8 * (256 / nxpr);
-if (nppr < 2) maxvl_ppr = 8 * 256;
-else maxvl_ppr = 8 * (256 / nppr);
+if (nppr < 2) maxvl_ppr = 8 * 1024;
+else maxvl_ppr = 8 * (1024 / nppr);
 uint32_t maxvl = std::min(maxvl_xpr, maxvl_ppr);
 WRITE_MAXVL(maxvl);
 WRITE_VL(0);
 WRITE_ENABLE(true);
+#ifdef RISCV_ENABLE_HCOMMITLOG
+  printf("H: VSETCFG nvpr:=%ld nppr=%ld maxvl=%ld\n", nxpr, nppr, maxvl);
+#endif
