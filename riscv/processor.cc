@@ -8,6 +8,7 @@
 #include "mmu.h"
 #include "htif.h"
 #include "disasm.h"
+#include "gdbserver.h"
 #include <cinttypes>
 #include <cmath>
 #include <cstdlib>
@@ -20,9 +21,10 @@
 #undef STATE
 #define STATE state
 
-processor_t::processor_t(const char* isa, sim_t* sim, uint32_t id)
-  : sim(sim), ext(NULL), disassembler(new disassembler_t),
-    id(id), run(false), debug(false)
+processor_t::processor_t(const char* isa, sim_t* sim, uint32_t id,
+        bool halt_on_reset)
+  : debug(false), sim(sim), ext(NULL), disassembler(new disassembler_t),
+    id(id), run(false), halt_on_reset(halt_on_reset)
 {
   parse_isa_string(isa);
 
@@ -144,6 +146,8 @@ void processor_t::reset(bool value)
   run = !value;
 
   state.reset();
+  state.dcsr.halt = halt_on_reset;
+  halt_on_reset = false;
   set_csr(CSR_MSTATUS, state.mstatus);
 
   if (ext)
@@ -192,11 +196,39 @@ void processor_t::set_privilege(reg_t prv)
   state.prv = prv;
 }
 
+void processor_t::enter_debug_mode(uint8_t cause)
+{
+  state.dcsr.cause = cause;
+  state.dcsr.prv = state.prv;
+  set_privilege(PRV_M);
+  state.dpc = state.pc;
+  state.pc = DEBUG_ROM_START;
+  //debug = true; // TODO
+}
+
 void processor_t::take_trap(trap_t& t, reg_t epc)
 {
-  if (debug)
+  if (debug) {
     fprintf(stderr, "core %3d: exception %s, epc 0x%016" PRIx64 "\n",
             id, t.name(), epc);
+    if (t.has_badaddr())
+      fprintf(stderr, "core %3d:           badaddr 0x%016" PRIx64 "\n", id,
+          t.get_badaddr());
+  }
+
+  if (t.cause() == CAUSE_BREAKPOINT && (
+              (state.prv == PRV_M && state.dcsr.ebreakm) ||
+              (state.prv == PRV_H && state.dcsr.ebreakh) ||
+              (state.prv == PRV_S && state.dcsr.ebreaks) ||
+              (state.prv == PRV_U && state.dcsr.ebreaku))) {
+    enter_debug_mode(DCSR_CAUSE_SWBP);
+    return;
+  }
+
+  if (state.dcsr.cause) {
+    state.pc = DEBUG_ROM_EXCEPTION;
+    return;
+  }
 
   // by default, trap to M-mode, unless delegated to S-mode
   reg_t bit = t.cause();
@@ -219,8 +251,8 @@ void processor_t::take_trap(trap_t& t, reg_t epc)
     set_privilege(PRV_S);
   } else {
     state.pc = state.mtvec;
-    state.mcause = t.cause();
     state.mepc = epc;
+    state.mcause = t.cause();
     if (t.has_badaddr())
       state.mbadaddr = t.get_badaddr();
 
@@ -254,7 +286,7 @@ static bool validate_vm(int max_xlen, reg_t vm)
 void processor_t::set_csr(int which, reg_t val)
 {
   val = zext_xlen(val);
-  reg_t delegable_ints = MIP_SSIP | MIP_STIP | (1 << IRQ_COP);
+  reg_t delegable_ints = MIP_SSIP | MIP_STIP | MIP_SEIP | (1 << IRQ_COP);
   reg_t all_ints = delegable_ints | MIP_MSIP | MIP_MTIP;
   switch (which)
   {
@@ -346,6 +378,22 @@ void processor_t::set_csr(int which, reg_t val)
     case CSR_MSCRATCH: state.mscratch = val; break;
     case CSR_MCAUSE: state.mcause = val; break;
     case CSR_MBADADDR: state.mbadaddr = val; break;
+    case CSR_DCSR:
+      state.dcsr.prv = get_field(val, DCSR_PRV);
+      state.dcsr.step = get_field(val, DCSR_STEP);
+      // TODO: ndreset and fullreset
+      state.dcsr.ebreakm = get_field(val, DCSR_EBREAKM);
+      state.dcsr.ebreakh = get_field(val, DCSR_EBREAKH);
+      state.dcsr.ebreaks = get_field(val, DCSR_EBREAKS);
+      state.dcsr.ebreaku = get_field(val, DCSR_EBREAKU);
+      state.dcsr.halt = get_field(val, DCSR_HALT);
+      break;
+    case CSR_DPC:
+      state.dpc = val;
+      break;
+    case CSR_DSCRATCH:
+      state.dscratch = val;
+      break;
   }
 }
 
@@ -434,6 +482,30 @@ reg_t processor_t::get_csr(int which)
     case CSR_MTVEC: return state.mtvec;
     case CSR_MEDELEG: return state.medeleg;
     case CSR_MIDELEG: return state.mideleg;
+    case CSR_DCSR:
+      {
+        uint32_t v = 0;
+        v = set_field(v, DCSR_XDEBUGVER, 1);
+        v = set_field(v, DCSR_HWBPCOUNT, 0);
+        v = set_field(v, DCSR_NDRESET, 0);
+        v = set_field(v, DCSR_FULLRESET, 0);
+        v = set_field(v, DCSR_PRV, state.dcsr.prv);
+        v = set_field(v, DCSR_STEP, state.dcsr.step);
+        v = set_field(v, DCSR_DEBUGINT, sim->debug_module.get_interrupt(id));
+        v = set_field(v, DCSR_STOPCYCLE, 0);
+        v = set_field(v, DCSR_STOPTIME, 0);
+        v = set_field(v, DCSR_EBREAKM, state.dcsr.ebreakm);
+        v = set_field(v, DCSR_EBREAKH, state.dcsr.ebreakh);
+        v = set_field(v, DCSR_EBREAKS, state.dcsr.ebreaks);
+        v = set_field(v, DCSR_EBREAKU, state.dcsr.ebreaku);
+        v = set_field(v, DCSR_HALT, state.dcsr.halt);
+        v = set_field(v, DCSR_CAUSE, state.dcsr.cause);
+        return v;
+      }
+    case CSR_DPC:
+      return state.dpc;
+    case CSR_DSCRATCH:
+      return state.dscratch;
   }
   throw trap_illegal_instruction();
 }

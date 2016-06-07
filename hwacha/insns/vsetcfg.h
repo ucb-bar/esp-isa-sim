@@ -13,5 +13,5 @@ WRITE_MAXVL(maxvl);
 WRITE_VL(0);
 WRITE_ENABLE(true);
 #ifdef RISCV_ENABLE_HCOMMITLOG
-  printf("H: VSETCFG nvpr:=%ld nppr=%ld maxvl=%ld\n", nxpr, nppr, maxvl);
+  printf("H: VSETCFG nvpr:=%d nppr=%d maxvl=%d\n", nxpr, nppr, maxvl);
 #endif

@@ -8,15 +8,17 @@
 #include <memory>
 #include "processor.h"
 #include "devices.h"
+#include "debug_module.h"
 
 class htif_isasim_t;
 class mmu_t;
+class gdbserver_t;
 
 // this class encapsulates the processors and memory in a RISC-V machine.
 class sim_t
 {
 public:
-  sim_t(const char* isa, size_t _nprocs, size_t mem_mb,
+  sim_t(const char* isa, size_t _nprocs, size_t mem_mb, bool halted,
         const std::vector<std::string>& htif_args);
   ~sim_t();
 
@@ -27,6 +29,7 @@ public:
   void set_log(bool value);
   void set_histogram(bool value);
   void set_procs_debug(bool value);
+  void set_gdbserver(gdbserver_t* gdbserver) { this->gdbserver = gdbserver; }
   htif_isasim_t* get_htif() { return htif.get(); }
   const char* get_config_string() { return config_string.c_str(); }
 
@@ -44,6 +47,7 @@ private:
   std::unique_ptr<rom_device_t> boot_rom;
   std::unique_ptr<rtc_t> rtc;
   bus_t bus;
+  debug_module_t debug_module;
 
   processor_t* get_core(const std::string& i);
   void step(size_t n); // step through simulation
@@ -54,6 +58,7 @@ private:
   bool debug;
   bool log;
   bool histogram_enabled; // provide a histogram of PCs
+  gdbserver_t* gdbserver;
 
   // memory-mapped I/O routines
   bool addr_is_mem(reg_t addr) {
@@ -89,6 +94,7 @@ private:
   friend class htif_isasim_t;
   friend class processor_t;
   friend class mmu_t;
+  friend class gdbserver_t;
 };
 
 extern volatile bool ctrlc_pressed;

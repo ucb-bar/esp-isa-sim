@@ -33,12 +33,38 @@
 #define SSTATUS32_SD        0x80000000
 #define SSTATUS64_SD        0x8000000000000000
 
+#define DCSR_XDEBUGVER      (3U<<30)
+#define DCSR_NDRESET        (1<<29)
+#define DCSR_FULLRESET      (1<<28)
+#define DCSR_HWBPCOUNT      (0xfff<<16)
+#define DCSR_EBREAKM        (1<<15)
+#define DCSR_EBREAKH        (1<<14)
+#define DCSR_EBREAKS        (1<<13)
+#define DCSR_EBREAKU        (1<<12)
+#define DCSR_STOPCYCLE      (1<<10)
+#define DCSR_STOPTIME       (1<<9)
+#define DCSR_CAUSE          (7<<6)
+#define DCSR_DEBUGINT       (1<<5)
+#define DCSR_HALT           (1<<3)
+#define DCSR_STEP           (1<<2)
+#define DCSR_PRV            (3<<0)
+
+#define DCSR_CAUSE_NONE     0
+#define DCSR_CAUSE_SWBP     1
+#define DCSR_CAUSE_HWBP     2
+#define DCSR_CAUSE_DEBUGINT 3
+#define DCSR_CAUSE_STEP     4
+#define DCSR_CAUSE_HALT     5
+
 #define MIP_SSIP            (1 << IRQ_S_SOFT)
 #define MIP_HSIP            (1 << IRQ_H_SOFT)
 #define MIP_MSIP            (1 << IRQ_M_SOFT)
 #define MIP_STIP            (1 << IRQ_S_TIMER)
 #define MIP_HTIP            (1 << IRQ_H_TIMER)
 #define MIP_MTIP            (1 << IRQ_M_TIMER)
+#define MIP_SEIP            (1 << IRQ_S_EXT)
+#define MIP_HEIP            (1 << IRQ_H_EXT)
+#define MIP_MEIP            (1 << IRQ_M_EXT)
 
 #define SIP_SSIP MIP_SSIP
 #define SIP_STIP MIP_STIP
@@ -61,9 +87,9 @@
 #define IRQ_S_TIMER  5
 #define IRQ_H_TIMER  6
 #define IRQ_M_TIMER  7
-#define IRQ_S_DEV    9
-#define IRQ_H_DEV    10
-#define IRQ_M_DEV    11
+#define IRQ_S_EXT    9
+#define IRQ_H_EXT    10
+#define IRQ_M_EXT    11
 #define IRQ_COP      12
 #define IRQ_HOST     13
 
@@ -360,6 +386,8 @@
 #define MASK_HRET  0xffffffff
 #define MATCH_MRET 0x30200073
 #define MASK_MRET  0xffffffff
+#define MATCH_DRET 0x7b200073
+#define MASK_DRET  0xffffffff
 #define MATCH_SFENCE_VM 0x10400073
 #define MASK_SFENCE_VM  0xfff07fff
 #define MATCH_WFI 0x10500073
@@ -669,6 +697,9 @@
 #define CSR_MSCYCLE_DELTA 0x704
 #define CSR_MSTIME_DELTA 0x705
 #define CSR_MSINSTRET_DELTA 0x706
+#define CSR_DCSR 0x7b0
+#define CSR_DPC 0x7b1
+#define CSR_DSCRATCH 0x7b2
 #define CSR_MCYCLE 0xf00
 #define CSR_MTIME 0xf01
 #define CSR_MINSTRET 0xf02
@@ -796,6 +827,7 @@ DECLARE_INSN(uret, MATCH_URET, MASK_URET)
 DECLARE_INSN(sret, MATCH_SRET, MASK_SRET)
 DECLARE_INSN(hret, MATCH_HRET, MASK_HRET)
 DECLARE_INSN(mret, MATCH_MRET, MASK_MRET)
+DECLARE_INSN(dret, MATCH_DRET, MASK_DRET)
 DECLARE_INSN(sfence_vm, MATCH_SFENCE_VM, MASK_SFENCE_VM)
 DECLARE_INSN(wfi, MATCH_WFI, MASK_WFI)
 DECLARE_INSN(csrrw, MATCH_CSRRW, MASK_CSRRW)
@@ -971,6 +1003,9 @@ DECLARE_CSR(muinstret_delta, CSR_MUINSTRET_DELTA)
 DECLARE_CSR(mscycle_delta, CSR_MSCYCLE_DELTA)
 DECLARE_CSR(mstime_delta, CSR_MSTIME_DELTA)
 DECLARE_CSR(msinstret_delta, CSR_MSINSTRET_DELTA)
+DECLARE_CSR(dcsr, CSR_DCSR)
+DECLARE_CSR(dpc, CSR_DPC)
+DECLARE_CSR(dscratch, CSR_DSCRATCH)
 DECLARE_CSR(mcycle, CSR_MCYCLE)
 DECLARE_CSR(mtime, CSR_MTIME)
 DECLARE_CSR(minstret, CSR_MINSTRET)

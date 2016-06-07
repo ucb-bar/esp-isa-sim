@@ -3,6 +3,7 @@
 #include "sim.h"
 #include "mmu.h"
 #include "htif.h"
+#include "gdbserver.h"
 #include <map>
 #include <iostream>
 #include <sstream>
@@ -20,10 +21,10 @@ static void handle_signal(int sig)
   signal(sig, &handle_signal);
 }
 
-sim_t::sim_t(const char* isa, size_t nprocs, size_t mem_mb,
+sim_t::sim_t(const char* isa, size_t nprocs, size_t mem_mb, bool halted,
              const std::vector<std::string>& args)
   : htif(new htif_isasim_t(this, args)), procs(std::max(nprocs, size_t(1))),
-    current_step(0), current_proc(0), debug(false)
+    current_step(0), current_proc(0), debug(false), gdbserver(NULL)
 {
   signal(SIGINT, &handle_signal);
   // allocate target machine's memory, shrinking it as necessary
@@ -41,10 +42,13 @@ sim_t::sim_t(const char* isa, size_t nprocs, size_t mem_mb,
     fprintf(stderr, "warning: only got %lu bytes of target mem (wanted %lu)\n",
             (unsigned long)memsz, (unsigned long)memsz0);
 
+  bus.add_device(DEBUG_START, &debug_module);
+
   debug_mmu = new mmu_t(this, NULL);
 
-  for (size_t i = 0; i < procs.size(); i++)
-    procs[i] = new processor_t(isa, this, i);
+  for (size_t i = 0; i < procs.size(); i++) {
+    procs[i] = new processor_t(isa, this, i, halted);
+  }
 
   rtc.reset(new rtc_t(procs));
   make_config_string();
@@ -68,6 +72,9 @@ int sim_t::run()
       interactive();
     else
       step(INTERLEAVE);
+    if (gdbserver) {
+        gdbserver->handle();
+    }
   }
   return htif->exit_code();
 }

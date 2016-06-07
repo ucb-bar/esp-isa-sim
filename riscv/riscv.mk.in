@@ -10,6 +10,7 @@ riscv_hdrs = \
 	htif.h \
 	common.h \
 	decode.h \
+	devices.h \
 	disasm.h \
 	mmu.h \
 	processor.h \
@@ -18,10 +19,13 @@ riscv_hdrs = \
 	encoding.h \
 	cachesim.h \
 	memtracer.h \
+	tracer.h \
 	extension.h \
 	rocc.h \
 	insn_template.h \
 	mulhi.h \
+	gdbserver.h \
+	debug_module.h \
 
 riscv_precompiled_hdrs = \
 	insn_template.h \
@@ -43,6 +47,8 @@ riscv_srcs = \
 	devices.cc \
 	rom.cc \
 	rtc.cc \
+	gdbserver.cc \
+	debug_module.cc \
 	$(riscv_gen_srcs) \
 
 riscv_test_srcs =
@@ -128,6 +134,7 @@ riscv_insn_list = \
 	divu \
 	divuw \
 	divw \
+	dret \
 	ebreak \
 	ecall \
 	fadd_d \

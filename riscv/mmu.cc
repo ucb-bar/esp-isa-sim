@@ -37,7 +37,7 @@ reg_t mmu_t::translate(reg_t addr, access_type type)
   reg_t mode = proc->state.prv;
   bool pum = false;
   if (type != FETCH) {
-    if (get_field(proc->state.mstatus, MSTATUS_MPRV))
+    if (!proc->state.dcsr.cause && get_field(proc->state.mstatus, MSTATUS_MPRV))
       mode = get_field(proc->state.mstatus, MSTATUS_MPP);
     pum = (mode == PRV_S && get_field(proc->state.mstatus, MSTATUS_PUM));
   }
@@ -51,15 +51,22 @@ reg_t mmu_t::translate(reg_t addr, access_type type)
   return walk(addr, type, mode > PRV_U, pum) | (addr & (PGSIZE-1));
 }
 
-const uint16_t* mmu_t::fetch_slow_path(reg_t addr)
+const uint16_t* mmu_t::fetch_slow_path(reg_t vaddr)
 {
-  reg_t paddr = translate(addr, FETCH);
+  reg_t paddr = translate(vaddr, FETCH);
+
+  // mmu_t::walk() returns -1 if it can't find a match. Of course -1 could also
+  // be a valid address.
+  if (paddr == ~(reg_t) 0 && vaddr != ~(reg_t) 0) {
+    throw trap_instruction_access_fault(vaddr);
+  }
+
   if (sim->addr_is_mem(paddr)) {
-    refill_tlb(addr, paddr, FETCH);
+    refill_tlb(vaddr, paddr, FETCH);
     return (const uint16_t*)sim->addr_to_mem(paddr);
   } else {
     if (!sim->mmio_load(paddr, sizeof fetch_temp, (uint8_t*)&fetch_temp))
-      throw trap_instruction_access_fault(addr);
+      throw trap_instruction_access_fault(vaddr);
     return &fetch_temp;
   }
 }
@@ -151,7 +158,8 @@ reg_t mmu_t::walk(reg_t addr, access_type type, bool supervisor, bool pum)
       *(uint32_t*)ppte |= PTE_R | ((type == STORE) * PTE_D);
       // for superpage mappings, make a fake leaf PTE for the TLB's benefit.
       reg_t vpn = addr >> PGSHIFT;
-      return (ppn | (vpn & ((reg_t(1) << ptshift) - 1))) << PGSHIFT;
+      reg_t value = (ppn | (vpn & ((reg_t(1) << ptshift) - 1))) << PGSHIFT;
+      return value;
     }
   }
 

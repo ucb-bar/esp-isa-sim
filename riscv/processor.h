@@ -31,6 +31,18 @@ struct commit_log_reg_t
   reg_t data;
 };
 
+typedef struct
+{
+  uint8_t prv;
+  bool step;
+  bool ebreakm;
+  bool ebreakh;
+  bool ebreaks;
+  bool ebreaku;
+  bool halt;
+  uint8_t cause;
+} dcsr_t;
+
 // architectural state of a RISC-V hart
 struct state_t
 {
@@ -61,9 +73,21 @@ struct state_t
   reg_t stvec;
   reg_t sptbr;
   reg_t scause;
+  reg_t dpc;
+  reg_t dscratch;
+  dcsr_t dcsr;
+
   uint32_t fflags;
   uint32_t frm;
   bool serialized; // whether timer CSRs are in a well-defined state
+
+  // When true, execute a single instruction and then enter debug mode.  This
+  // can only be set by executing dret.
+  enum {
+      STEP_NONE,
+      STEP_STEPPING,
+      STEP_STEPPED
+  } single_step;
 
   reg_t load_reservation;
 
@@ -77,7 +101,7 @@ struct state_t
 class processor_t : public abstract_device_t
 {
 public:
-  processor_t(const char* isa, sim_t* sim, uint32_t id);
+  processor_t(const char* isa, sim_t* sim, uint32_t id, bool halt_on_reset=false);
   ~processor_t();
 
   void set_debug(bool value);
@@ -107,6 +131,9 @@ public:
   bool load(reg_t addr, size_t len, uint8_t* bytes);
   bool store(reg_t addr, size_t len, const uint8_t* bytes);
 
+  // When true, display disassembly of each instruction that's executed.
+  bool debug;
+
 private:
   sim_t* sim;
   mmu_t* mmu; // main memory is always accessed via the mmu
@@ -119,8 +146,8 @@ private:
   reg_t isa;
   std::string isa_string;
   bool run; // !reset
-  bool debug;
   bool histogram_enabled;
+  bool halt_on_reset;
 
   std::vector<insn_desc_t> instructions;
   std::map<reg_t,uint64_t> pc_histogram;
@@ -132,6 +159,8 @@ private:
   void take_interrupt(); // take a trap if any interrupts are pending
   void take_trap(trap_t& t, reg_t epc); // take an exception
   void disasm(insn_t insn); // disassemble and print an instruction
+
+  void enter_debug_mode(uint8_t cause);
 
   friend class sim_t;
   friend class mmu_t;

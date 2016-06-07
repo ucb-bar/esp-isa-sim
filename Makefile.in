@@ -71,7 +71,7 @@ install_exes_dir := $(INSTALLDIR)/bin
 sprojs         := @subprojects@
 sprojs_enabled := @subprojects_enabled@
 
-sprojs_include := -I. $(addprefix -I$(src_dir)/, $(sprojs_enabled))
+sprojs_include := -I. -I$(src_dir) $(addprefix -I$(src_dir)/, $(sprojs_enabled))
 VPATH := $(addprefix $(src_dir)/, $(sprojs_enabled))
 
 #-------------------------------------------------------------------------
@@ -84,9 +84,9 @@ VPATH := $(addprefix $(src_dir)/, $(sprojs_enabled))
 
 CC            := @CC@
 CXX           := @CXX@
-CFLAGS        += @CFLAGS@ -DPREFIX=\"$(prefix)\"
+CFLAGS        += @CFLAGS@ -DPREFIX=\"$(prefix)\" -Werror
 CPPFLAGS      += @CPPFLAGS@
-CXXFLAGS      += @CXXFLAGS@ -DPREFIX=\"$(prefix)\"
+CXXFLAGS      += @CXXFLAGS@ -DPREFIX=\"$(prefix)\" -Werror
 COMPILE       := $(CXX) -fPIC -MMD -MP $(CPPFLAGS) $(CXXFLAGS) \
                  $(sprojs_include)
 COMPILE_C     := $(CC) -fPIC -MMD -MP $(CPPFLAGS) $(CFLAGS) \
@@ -119,6 +119,10 @@ INSTALL_HDR   := $(INSTALL) -m 444
 INSTALL_LIB   := $(INSTALL) -m 644
 INSTALL_EXE   := $(INSTALL) -m 555
 STOW          := @stow@
+
+# Tests
+bintests = $(src_dir)/tests/gdbserver.py \
+	   $(src_dir)/tests/ebreak.py
 
 #-------------------------------------------------------------------------
 # Include subproject makefile fragments
@@ -329,8 +333,18 @@ deps : $(deps)
 # Check
 #-------------------------------------------------------------------------
 
-check : $(test_outs)
-	echo; grep -h -e'Unit Tests' -e'FAILED' -e'Segementation' $^; echo
+bintest_outs = $(bintests:=.out)
+junk += $(bintest_outs)
+%.out: % all
+	./$* < /dev/null 2>&1 | tee $@
+
+check-cpp : $(test_outs)
+	echo; grep -h -e'Unit Tests' -e'FAILED' -e'Segmentation' $^ < /dev/null; echo
+
+check-bin : $(bintest_outs)
+	tail -n 1 $^ < /dev/null
+
+check : check-cpp check-bin
 
 .PHONY : check
 

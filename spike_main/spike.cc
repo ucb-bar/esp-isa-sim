@@ -2,6 +2,7 @@
 
 #include "sim.h"
 #include "mmu.h"
+#include "gdbserver.h"
 #include "htif.h"
 #include "cachesim.h"
 #include "extension.h"
@@ -9,7 +10,6 @@
 #include <fesvr/option_parser.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <getopt.h>
 #include <vector>
 #include <string>
 #include <memory>
@@ -24,12 +24,14 @@ static void help()
   fprintf(stderr, "  -g                    Track histogram of PCs\n");
   fprintf(stderr, "  -l                    Generate a log of execution\n");
   fprintf(stderr, "  -h                    Print this help message\n");
+  fprintf(stderr, "  -H                 Start halted, allowing a debugger to connect\n");
   fprintf(stderr, "  --isa=<name>          RISC-V ISA string [default %s]\n", DEFAULT_ISA);
   fprintf(stderr, "  --ic=<S>:<W>:<B>      Instantiate a cache model with S sets,\n");
   fprintf(stderr, "  --dc=<S>:<W>:<B>        W ways, and B-byte blocks (with S and\n");
   fprintf(stderr, "  --l2=<S>:<W>:<B>        B both powers of 2).\n");
   fprintf(stderr, "  --extension=<name>    Specify RoCC Extension\n");
   fprintf(stderr, "  --extlib=<name>       Shared library to load\n");
+  fprintf(stderr, "  --gdb-port=<port>  Listen on <port> for gdb to connect\n");
   fprintf(stderr, "  --dump-config-string  Print platform configuration string and exit\n");
   exit(1);
 }
@@ -37,6 +39,7 @@ static void help()
 int main(int argc, char** argv)
 {
   bool debug = false;
+  bool halted = false;
   bool histogram = false;
   bool log = false;
   bool dump_config_string = false;
@@ -47,6 +50,7 @@ int main(int argc, char** argv)
   std::unique_ptr<cache_sim_t> l2;
   std::function<extension_t*()> extension;
   const char* isa = DEFAULT_ISA;
+  uint16_t gdb_port = 0;
 
   option_parser_t parser;
   parser.help(&help);
@@ -56,6 +60,9 @@ int main(int argc, char** argv)
   parser.option('l', 0, 0, [&](const char* s){log = true;});
   parser.option('p', 0, 1, [&](const char* s){nprocs = atoi(s);});
   parser.option('m', 0, 1, [&](const char* s){mem_mb = atoi(s);});
+  // I wanted to use --halted, but for some reason that doesn't work.
+  parser.option('H', 0, 0, [&](const char* s){halted = true;});
+  parser.option(0, "gdb-port", 1, [&](const char* s){gdb_port = atoi(s);});
   parser.option(0, "ic", 1, [&](const char* s){ic.reset(new icache_sim_t(s));});
   parser.option(0, "dc", 1, [&](const char* s){dc.reset(new dcache_sim_t(s));});
   parser.option(0, "l2", 1, [&](const char* s){l2.reset(cache_sim_t::construct(s, "L2$"));});
@@ -72,7 +79,12 @@ int main(int argc, char** argv)
 
   auto argv1 = parser.parse(argv);
   std::vector<std::string> htif_args(argv1, (const char*const*)argv + argc);
-  sim_t s(isa, nprocs, mem_mb, htif_args);
+  sim_t s(isa, nprocs, mem_mb, halted, htif_args);
+  std::unique_ptr<gdbserver_t> gdbserver;
+  if (gdb_port) {
+    gdbserver = std::unique_ptr<gdbserver_t>(new gdbserver_t(gdb_port, &s));
+    s.set_gdbserver(&(*gdbserver));
+  }
 
   if (dump_config_string) {
     printf("%s", s.get_config_string());

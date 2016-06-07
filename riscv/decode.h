@@ -227,7 +227,10 @@ private:
 #define require_fp require((STATE.mstatus & MSTATUS_FS) != 0)
 #define require_accelerator require((STATE.mstatus & MSTATUS_XS) != 0)
 
-#define set_fp_exceptions ({ STATE.fflags |= softfloat_exceptionFlags; \
+#define set_fp_exceptions ({ if (softfloat_exceptionFlags) { \
+                               dirty_fp_state; \
+                               STATE.fflags |= softfloat_exceptionFlags; \
+                             } \
                              softfloat_exceptionFlags = 0; })
 
 #define sext32(x) ((sreg_t)(int32_t)(x))
@@ -264,5 +267,18 @@ private:
   if (((write) && csr_read_only) || STATE.prv < csr_priv) \
     throw trap_illegal_instruction(); \
   (which); })
+
+#define DEBUG_START             0x100
+#define DEBUG_ROM_START         0x800
+#define DEBUG_ROM_RESUME        (DEBUG_ROM_START + 4)
+#define DEBUG_ROM_EXCEPTION     (DEBUG_ROM_START + 8)
+#define DEBUG_ROM_END           (DEBUG_ROM_START + debug_rom_raw_len)
+#define DEBUG_RAM_START         0x400
+#define DEBUG_RAM_SIZE          64
+#define DEBUG_RAM_END           (DEBUG_RAM_START + DEBUG_RAM_SIZE)
+#define DEBUG_END               0xfff
+#define DEBUG_CLEARDEBINT       0x100
+#define DEBUG_SETHALTNOT        0x10c
+#define DEBUG_SIZE              (DEBUG_END - DEBUG_START + 1)
 
 #endif
