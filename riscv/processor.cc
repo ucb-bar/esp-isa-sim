@@ -6,7 +6,6 @@
 #include "config.h"
 #include "sim.h"
 #include "mmu.h"
-#include "htif.h"
 #include "disasm.h"
 #include "gdbserver.h"
 #include <cinttypes>
@@ -23,16 +22,15 @@
 
 processor_t::processor_t(const char* isa, sim_t* sim, uint32_t id,
         bool halt_on_reset)
-  : debug(false), sim(sim), ext(NULL), disassembler(new disassembler_t),
-    id(id), run(false), halt_on_reset(halt_on_reset)
+  : debug(false), sim(sim), ext(NULL), id(id), halt_on_reset(halt_on_reset)
 {
   parse_isa_string(isa);
+  register_base_instructions();
 
   mmu = new mmu_t(sim, this);
+  disassembler = new disassembler_t(max_xlen);
 
-  reset(true);
-
-  register_base_instructions();
+  reset();
 }
 
 processor_t::~processor_t()
@@ -86,6 +84,7 @@ void processor_t::parse_isa_string(const char* str)
 
   isa_string = "rv" + std::to_string(max_xlen) + p;
   isa |= 1L << ('s' - 'a'); // advertise support for supervisor mode
+  isa |= 1L << ('u' - 'a'); // advertise support for user mode
 
   while (*p) {
     isa |= 1L << (*p - 'a');
@@ -139,12 +138,8 @@ void processor_t::set_histogram(bool value)
 #endif
 }
 
-void processor_t::reset(bool value)
+void processor_t::reset()
 {
-  if (run == !value)
-    return;
-  run = !value;
-
   state.reset();
   state.dcsr.halt = halt_on_reset;
   halt_on_reset = false;
@@ -184,7 +179,7 @@ void processor_t::take_interrupt()
     raise_interrupt(ctz(enabled_interrupts));
 }
 
-static bool validate_priv(reg_t priv)
+bool processor_t::validate_priv(reg_t priv)
 {
   return priv == PRV_U || priv == PRV_S || priv == PRV_M;
 }
@@ -283,6 +278,12 @@ static bool validate_vm(int max_xlen, reg_t vm)
   return vm == VM_MBARE;
 }
 
+int processor_t::paddr_bits()
+{
+  assert(xlen == max_xlen);
+  return max_xlen == 64 ? 50 : 34;
+}
+
 void processor_t::set_csr(int which, reg_t val)
 {
   val = zext_xlen(val);
@@ -305,12 +306,12 @@ void processor_t::set_csr(int which, reg_t val)
       break;
     case CSR_MSTATUS: {
       if ((val ^ state.mstatus) &
-          (MSTATUS_VM | MSTATUS_MPP | MSTATUS_MPRV | MSTATUS_PUM))
+          (MSTATUS_VM | MSTATUS_MPP | MSTATUS_MPRV | MSTATUS_PUM | MSTATUS_MXR))
         mmu->flush_tlb();
 
       reg_t mask = MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_MIE | MSTATUS_MPIE
                  | MSTATUS_SPP | MSTATUS_FS | MSTATUS_MPRV | MSTATUS_PUM
-                 | (ext ? MSTATUS_XS : 0);
+                 | MSTATUS_MXR | (ext ? MSTATUS_XS : 0);
 
       if (validate_vm(max_xlen, get_field(val, MSTATUS_VM)))
         mask |= MSTATUS_VM;
@@ -367,9 +368,13 @@ void processor_t::set_csr(int which, reg_t val)
     case CSR_SIE:
       return set_csr(CSR_MIE,
                      (state.mie & ~state.mideleg) | (val & state.mideleg));
+    case CSR_SPTBR: {
+      // upper bits of sptbr are the ASID; we only support ASID = 0
+      state.sptbr = val & (((reg_t)1 << (paddr_bits() - PGSHIFT)) - 1);
+      break;
+    }
     case CSR_SEPC: state.sepc = val; break;
     case CSR_STVEC: state.stvec = val >> 2 << 2; break;
-    case CSR_SPTBR: state.sptbr = val; break;
     case CSR_SSCRATCH: state.sscratch = val; break;
     case CSR_SCAUSE: state.scause = val; break;
     case CSR_SBADADDR: state.sbadaddr = val; break;
@@ -465,7 +470,6 @@ reg_t processor_t::get_csr(int which)
         return state.scause | ((state.scause >> (max_xlen-1)) << (xlen-1));
       return state.scause;
     case CSR_SPTBR: return state.sptbr;
-    case CSR_SASID: return 0;
     case CSR_SSCRATCH: return state.sscratch;
     case CSR_MSTATUS: return state.mstatus;
     case CSR_MIP: return state.mip;
@@ -483,9 +487,6 @@ reg_t processor_t::get_csr(int which)
     case CSR_MEDELEG: return state.medeleg;
     case CSR_MIDELEG: return state.mideleg;
     case CSR_TDRSELECT: return 0;
-    case CSR_TDRDATA1: return 0;
-    case CSR_TDRDATA2: return 0;
-    case CSR_TDRDATA3: return 0;
     case CSR_DCSR:
       {
         uint32_t v = 0;
@@ -565,7 +566,7 @@ void processor_t::build_opcode_map()
   std::sort(instructions.begin(), instructions.end(), cmp());
 
   for (size_t i = 0; i < OPCODE_CACHE_SIZE; i++)
-    opcode_cache[i] = {1, 0, &illegal_instruction, &illegal_instruction};
+    opcode_cache[i] = {0, 0, &illegal_instruction, &illegal_instruction};
 }
 
 void processor_t::register_extension(extension_t* x)

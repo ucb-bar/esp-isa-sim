@@ -40,7 +40,7 @@ public:
 
   // template for functions that load an aligned value from memory
   #define load_func(type) \
-    type##_t load_##type(reg_t addr) __attribute__((always_inline)) { \
+    inline type##_t load_##type(reg_t addr) { \
       if (addr & (sizeof(type##_t)-1)) \
         throw trap_load_address_misaligned(addr); \
       reg_t vpn = addr >> PGSHIFT; \
@@ -130,7 +130,8 @@ public:
 
   inline insn_fetch_t load_insn(reg_t addr)
   {
-    return access_icache(addr)->data;
+    icache_entry_t entry;
+    return refill_icache(addr, &entry)->data;
   }
 
   void flush_tlb();
@@ -159,7 +160,7 @@ private:
   const char* fill_from_mmio(reg_t vaddr, reg_t paddr);
 
   // perform a page table walk for a given VA; set referenced/dirty bits
-  reg_t walk(reg_t addr, access_type type, bool supervisor, bool pum);
+  reg_t walk(reg_t addr, access_type type, reg_t prv);
 
   // handle uncommon cases: TLB misses, page faults, MMIO
   const uint16_t* fetch_slow_path(reg_t addr);
@@ -168,7 +169,7 @@ private:
   reg_t translate(reg_t addr, access_type type);
 
   // ITLB lookup
-  const uint16_t* translate_insn_addr(reg_t addr) __attribute__((always_inline)) {
+  inline const uint16_t* translate_insn_addr(reg_t addr) {
     reg_t vpn = addr >> PGSHIFT;
     if (likely(tlb_insn_tag[vpn % TLB_ENTRIES] == vpn))
       return (uint16_t*)(tlb_data[vpn % TLB_ENTRIES] + addr);

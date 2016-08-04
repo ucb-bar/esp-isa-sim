@@ -106,9 +106,8 @@ public:
 
   void set_debug(bool value);
   void set_histogram(bool value);
-  void reset(bool value);
+  void reset();
   void step(size_t n); // run for n cycles
-  bool running() { return run; }
   void set_csr(int which, reg_t val);
   void raise_interrupt(reg_t which);
   reg_t get_csr(int which);
@@ -120,9 +119,11 @@ public:
     if (ext >= 'a' && ext <= 'z') ext += 'A' - 'a';
     return ext >= 'A' && ext <= 'Z' && ((isa >> (ext - 'A')) & 1);
   }
+  bool validate_priv(reg_t priv);
   void set_privilege(reg_t);
   void yield_load_reservation() { state.load_reservation = (reg_t)-1; }
   void update_histogram(reg_t pc);
+  const disassembler_t* get_disassembler() { return disassembler; }
 
   void register_insn(insn_desc_t);
   void register_extension(extension_t*);
@@ -145,7 +146,6 @@ private:
   unsigned xlen;
   reg_t isa;
   std::string isa_string;
-  bool run; // !reset
   bool histogram_enabled;
   bool halt_on_reset;
 
@@ -159,6 +159,7 @@ private:
   void take_interrupt(); // take a trap if any interrupts are pending
   void take_trap(trap_t& t, reg_t epc); // take an exception
   void disasm(insn_t insn); // disassemble and print an instruction
+  int paddr_bits();
 
   void enter_debug_mode(uint8_t cause);
 

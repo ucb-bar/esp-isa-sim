@@ -81,6 +81,36 @@ class operation_t
     unsigned int current_step;
 };
 
+/*
+ * word 32      64      128
+ * 0    inst/0  inst/0  inst/0
+ * 1    inst    inst/0  inst/0
+ * 2    inst    inst    inst/0
+ * 3    inst    inst    inst/0
+ * 4    data0   data0   data0
+ * 5    data1   data0   data0
+ * 6    data2   data1   data0
+ * 7            data1   data0
+ * 8            data2   data1
+ * 9            data2   data1
+ * 10                   data1
+ * 11                   data1
+ * 12                   data2
+ * 13                   data2
+ * 14                   data2
+ * 15                   data2
+ */
+enum slot {
+  SLOT_INST0,
+  SLOT_DATA0,
+  SLOT_DATA1,
+  SLOT_DATA_LAST,
+};
+
+static const unsigned int slot_offset32[] = {0, 4, 5, DEBUG_RAM_SIZE/4 - 1};
+static const unsigned int slot_offset64[] = {0, 4, 6, DEBUG_RAM_SIZE/4 - 2};
+static const unsigned int slot_offset128[] = {0, 4, 8, DEBUG_RAM_SIZE/4 - 4};
+
 class gdbserver_t
 {
 public:
@@ -120,6 +150,8 @@ public:
   // Hex-encode a 32-bit value, and send it to gcc in target byte order (little
   // endian).
   void send(uint32_t value);
+  // Hex-encode an 8-bit value, and send it to gcc.
+  void send(uint8_t value);
   void send_packet(const char* data);
   uint8_t running_checksum;
   // Send "$" and clear running checksum.
@@ -128,8 +160,21 @@ public:
   void end_packet(const char* data=NULL);
 
   // Write value to the index'th word in Debug RAM.
-  void write_debug_ram(unsigned int index, uint32_t value);
-  uint32_t read_debug_ram(unsigned int index);
+  void dr_write32(unsigned int index, uint32_t value);
+  void dr_write64(unsigned int index, uint64_t value);
+  void dr_write(enum slot slot, uint64_t value);
+  // Write jump-to-resume instruction to the index'th word in Debug RAM.
+  void dr_write_jump(unsigned int index);
+  // Write an xlen-bit store instruction.
+  void dr_write_store(unsigned int index, unsigned int reg, enum slot);
+  void dr_write_load(unsigned int index, unsigned int reg, enum slot);
+  uint32_t dr_read32(unsigned int index);
+  uint64_t dr_read64(unsigned int index);
+  uint64_t dr_read(enum slot slot);
+
+  // Return access size to use when writing length bytes to address, so that
+  // every write will be aligned.
+  unsigned int find_access_size(reg_t address, int length);
 
   void set_interrupt(uint32_t hartid);
 
@@ -151,6 +196,8 @@ public:
   // Return the VM_x that is used when the code under debug performs a memory
   // access.
   unsigned int virtual_memory();
+
+  unsigned int xlen;
 
 private:
   sim_t *sim;
