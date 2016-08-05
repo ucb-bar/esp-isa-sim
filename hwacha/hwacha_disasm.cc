@@ -276,7 +276,7 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
 
   #define DISASM_UT_INSN(name, code, extra, ...) \
     insns.push_back(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__)); \
-    ut_disassembler.add_insn(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__));
+    ut_disassembler->add_insn(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__));
 
   #define DEFINE_RTYPE(code) DISASM_UT_INSN(#code, code, 0, {&vdrd, &vdrs1, &vdrs2})
   #define DEFINE_R1TYPE(code) DISASM_UT_INSN(#code, code, 0, {&vdrd, &vdrs1})

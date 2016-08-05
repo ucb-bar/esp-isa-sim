@@ -49,7 +49,9 @@ struct ut_state_t
 class hwacha_t : public extension_t
 {
 public:
-  hwacha_t() : cause(0), aux(0), debug(false) {}
+  hwacha_t() : cause(0), aux(0), debug(false) {
+    ut_disassembler = new disassembler_t(64);
+  }
   std::vector<insn_desc_t> get_instructions();
   std::vector<disasm_insn_t*> get_disasms();
   const char* name() { return "hwacha"; }
@@ -69,7 +71,7 @@ public:
   void clear_exception() { clear_interrupt(); }
 
   bool get_debug() { return debug; }
-  disassembler_t* get_ut_disassembler() { return &ut_disassembler; }
+  disassembler_t* get_ut_disassembler() { return ut_disassembler; }
 
   static const int max_uts = 2048;
 
@@ -79,7 +81,7 @@ private:
   reg_t cause;
   reg_t aux;
 
-  disassembler_t ut_disassembler;
+  disassembler_t* ut_disassembler;
   bool debug;
 };
 
