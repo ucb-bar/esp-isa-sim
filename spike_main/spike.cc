@@ -99,7 +99,10 @@ int main(int argc, char** argv)
   {
     if (ic) s.get_core(i)->get_mmu()->register_memtracer(&*ic);
     if (dc) s.get_core(i)->get_mmu()->register_memtracer(&*dc);
-    if (extension) s.get_core(i)->register_extension(extension());
+    if (extension) {
+      s.get_core(i)->register_extension(extension());
+      s.get_core(i)->reset();
+    }
   }
 
   s.set_debug(debug);

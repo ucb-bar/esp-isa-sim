@@ -1,4 +1,4 @@
-if(!ENABLED) 
+if(!ENABLED)
   h->take_exception(HWACHA_CAUSE_ILLEGAL_INSTRUCTION, VF_PC);
 
 WRITE_SVARD(XS1);
