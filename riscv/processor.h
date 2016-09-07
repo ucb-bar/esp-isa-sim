@@ -65,8 +65,8 @@ struct state_t
   reg_t mip;
   reg_t medeleg;
   reg_t mideleg;
-  reg_t mucounteren;
-  reg_t mscounteren;
+  uint32_t mucounteren;
+  uint32_t mscounteren;
   reg_t sepc;
   reg_t sbadaddr;
   reg_t sscratch;
@@ -119,7 +119,6 @@ public:
     if (ext >= 'a' && ext <= 'z') ext += 'A' - 'a';
     return ext >= 'A' && ext <= 'Z' && ((isa >> (ext - 'A')) & 1);
   }
-  bool validate_priv(reg_t priv);
   void set_privilege(reg_t);
   void yield_load_reservation() { state.load_reservation = (reg_t)-1; }
   void update_histogram(reg_t pc);
