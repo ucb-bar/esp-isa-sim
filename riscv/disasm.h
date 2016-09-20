@@ -47,12 +47,12 @@ class disasm_insn_t
     return s.str();
   }
 
-  uint32_t get_match() const { return match; }
-  uint32_t get_mask() const { return mask; }
+  uint64_t get_match() const { return match; }
+  uint64_t get_mask() const { return mask; }
 
  private:
-  uint32_t match;
-  uint32_t mask;
+  uint64_t match;
+  uint64_t mask;
   std::vector<const arg_t*> args;
   const char* name;
 };

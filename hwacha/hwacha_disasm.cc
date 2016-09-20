@@ -212,6 +212,30 @@ struct : public arg_t {
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
+    return vppr[insn.vrd()];
+  }
+} vprd;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
+    return vppr[insn.vrs1()];
+  }
+} vprs1;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
+    return vppr[insn.vrs2()];
+  }
+} vprs2;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
+    return vppr[insn.vrs3()];
+  }
+} vprs3;
+
+struct : public arg_t {
+  std::string to_string(insn_t insn) const {
     return std::to_string(insn.i_imm() & 0x3f);
   }
 } nxregs;
@@ -288,6 +312,7 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
 
   DISASM_UT_INSN("vstop", vstop, 0, {});
   DISASM_UT_INSN("veidx", veidx, 0, {&vvrd});
+  DISASM_UT_INSN("vpop", vpop, 0, {&vprd, &vprs1, &vprs2, &vprs3});
 
   DEFINE_ITYPE(vaddi);
   DEFINE_ITYPE(vslli);
