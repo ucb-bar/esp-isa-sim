@@ -593,8 +593,12 @@ class register_read_op_t : public operation_t
       switch (step) {
         case 0:
           if (reg >= REG_XPR0 && reg <= REG_XPR31) {
-            die("handle_register_read");
-            // send(p->state.XPR[reg - REG_XPR0]);
+            if (gs.xlen == 32) {
+              gs.dr_write32(0, sw(reg - REG_XPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
+            } else {
+              gs.dr_write32(0, sd(reg - REG_XPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
+            }
+            gs.dr_write_jump(1);
           } else if (reg == REG_PC) {
             gs.start_packet();
             if (gs.xlen == 32) {
@@ -708,7 +712,15 @@ class memory_read_op_t : public operation_t
     // If data is NULL, send the result straight to gdb.
     memory_read_op_t(gdbserver_t& gdbserver, reg_t vaddr, unsigned int length,
         unsigned char *data=NULL) :
-      operation_t(gdbserver), vaddr(vaddr), length(length), data(data) {};
+      operation_t(gdbserver), vaddr(vaddr), length(length), data(data), index(0)
+    {
+      buf = new uint8_t[length];
+    };
+
+    ~memory_read_op_t()
+    {
+      delete[] buf;
+    }
 
     bool perform_step(unsigned int step)
     {
@@ -737,21 +749,24 @@ class memory_read_op_t : public operation_t
         gs.dr_write(SLOT_DATA0, paddr);
         gs.set_interrupt(0);
 
-        if (!data) {
-          gs.start_packet();
-        }
         return false;
       }
 
-      char buffer[3];
+      if (gs.dr_read32(DEBUG_RAM_SIZE / 4 - 1)) {
+        // Note that OpenOCD doesn't report this error to gdb by default. They
+        // think it can mess up stack tracing. So far I haven't seen any
+        // problems.
+        gs.send_packet("E99");
+        return true;
+      }
+
       reg_t value = gs.dr_read(SLOT_DATA1);
       for (unsigned int i = 0; i < access_size; i++) {
         if (data) {
           *(data++) = value & 0xff;
           D(fprintf(stderr, "%02x", (unsigned int) (value & 0xff)));
         } else {
-          sprintf(buffer, "%02x", (unsigned int) (value & 0xff));
-          gs.send(buffer);
+          buf[index++] = value & 0xff;
         }
         value >>= 8;
       }
@@ -763,6 +778,12 @@ class memory_read_op_t : public operation_t
 
       if (length == 0) {
         if (!data) {
+          gs.start_packet();
+          char buffer[3];
+          for (unsigned int i = 0; i < index; i++) {
+            sprintf(buffer, "%02x", (unsigned int) buf[i]);
+            gs.send(buffer);
+          }
           gs.end_packet();
         }
         return true;
@@ -779,6 +800,8 @@ class memory_read_op_t : public operation_t
     unsigned char* data;
     reg_t paddr;
     unsigned int access_size;
+    unsigned int index;
+    uint8_t *buf;
 };
 
 class memory_write_op_t : public operation_t
@@ -863,8 +886,8 @@ class memory_write_op_t : public operation_t
       }
 
       if (gs.dr_read32(DEBUG_RAM_SIZE / 4 - 1)) {
-        fprintf(stderr, "Exception happened while writing to 0x%016" PRIx64
-                " -> 0x%016" PRIx64 "\n", vaddr, paddr);
+        gs.send_packet("E98");
+        return true;
       }
 
       offset += access_size;
@@ -1651,7 +1674,8 @@ uint64_t consume_hex_number(std::vector<uint8_t>::const_iterator &iter,
 
 // First byte is the least-significant one.
 // Eg. "08675309" becomes 0x09536708
-uint64_t consume_hex_number_le(std::vector<uint8_t>::const_iterator &iter,
+uint64_t gdbserver_t::consume_hex_number_le(
+    std::vector<uint8_t>::const_iterator &iter,
     std::vector<uint8_t>::const_iterator end)
 {
   uint64_t value = 0;
@@ -1668,6 +1692,12 @@ uint64_t consume_hex_number_le(std::vector<uint8_t>::const_iterator &iter,
       shift += 12;
     else
       shift -= 4;
+  }
+  if (shift >= xlen) {
+    fprintf(stderr,
+        "gdb sent too many data bytes. That means it thinks XLEN is greater than %d.\n"
+        "To fix that, tell gdb: set arch riscv:rv%d\n",
+        xlen, xlen);
   }
   return value;
 }
