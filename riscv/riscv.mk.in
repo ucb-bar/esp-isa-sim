@@ -44,7 +44,7 @@ riscv_srcs = \
 	regnames.cc \
 	devices.cc \
 	rom.cc \
-	rtc.cc \
+	clint.cc \
 	gdbserver.cc \
 	debug_module.cc \
 	$(riscv_gen_srcs) \
@@ -180,9 +180,9 @@ riscv_insn_list = \
 	fmul_d \
 	fmul_s \
 	fmv_d_x \
-	fmv_s_x \
+	fmv_w_x \
 	fmv_x_d \
-	fmv_x_s \
+	fmv_x_w \
 	fnmadd_d \
 	fnmadd_s \
 	fnmsub_d \
@@ -227,7 +227,7 @@ riscv_insn_list = \
 	sc_d \
 	sc_w \
 	sd \
-	sfence_vm \
+	sfence_vma \
 	sh \
 	sll \
 	slli \

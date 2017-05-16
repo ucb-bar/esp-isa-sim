@@ -30,7 +30,7 @@
 
 #define VRM ({ int rm = insn.vrm(); \
               if(rm == 7) rm = h->get_ct_state()->frm; \
-              if(rm > 4) throw trap_illegal_instruction(); \
+              if(rm > 4) throw trap_illegal_instruction(0); \
               rm; })
 
 #define POP_TABLE (insn.vpop_table())

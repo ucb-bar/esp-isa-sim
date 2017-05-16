@@ -17,9 +17,7 @@
 #include "sim.h"
 #include "gdbserver.h"
 #include "mmu.h"
-
-#define C_EBREAK        0x9002
-#define EBREAK          0x00100073
+#include "encoding.h"
 
 //////////////////////////////////////// Utility Functions
 
@@ -45,6 +43,7 @@ enum {
   REG_FPR0 = 33,
   REG_FPR31 = 64,
   REG_CSR0 = 65,
+  REG_MSTATUS = CSR_MSTATUS + REG_CSR0,
   REG_CSR4095 = 4160,
   REG_PRIV = 4161
 };
@@ -211,21 +210,19 @@ static uint32_t fsd(unsigned int src, unsigned int base, uint16_t offset)
     MATCH_FSD;
 }
 
-static uint32_t flw(unsigned int src, unsigned int base, uint16_t offset)
+static uint32_t flw(unsigned int dest, unsigned int base, uint16_t offset)
 {
-  return (bits(offset, 11, 5) << 25) |
-    (bits(src, 4, 0) << 20) |
+  return (bits(offset, 11, 0) << 20) |
     (base << 15) |
-    (bits(offset, 4, 0) << 7) |
+    (bits(dest, 4, 0) << 7) |
     MATCH_FLW;
 }
 
-static uint32_t fld(unsigned int src, unsigned int base, uint16_t offset)
+static uint32_t fld(unsigned int dest, unsigned int base, uint16_t offset)
 {
-  return (bits(offset, 11, 5) << 25) |
-    (bits(src, 4, 0) << 20) |
+  return (bits(offset, 11, 0) << 20) |
     (base << 15) |
-    (bits(offset, 4, 0) << 7) |
+    (bits(dest, 4, 0) << 7) |
     MATCH_FLD;
 }
 
@@ -328,7 +325,7 @@ void circular_buffer_t<T>::append(const T *src, unsigned int count)
   count -= copy;
   if (count > 0) {
     assert(count < contiguous_empty_size());
-    memcpy(contiguous_empty(), src, count * sizeof(T));
+    memcpy(contiguous_empty(), src+copy, count * sizeof(T));
     data_added(count);
   }
 }
@@ -401,6 +398,7 @@ class halt_op_t : public operation_t
 
         case ST_MSTATUS:
           gs.mstatus = gs.dr_read(SLOT_DATA0);
+          gs.mstatus_dirty = false;
           gs.dr_write32(0, csrr(S0, CSR_DCSR));
           gs.dr_write32(1, sw(S0, 0, (uint16_t) DEBUG_RAM_START + 16));
           gs.dr_write_jump(2);
@@ -435,6 +433,7 @@ class halt_op_t : public operation_t
                 break;
             }
           }
+
           return true;
 
         default:
@@ -593,12 +592,16 @@ class register_read_op_t : public operation_t
       switch (step) {
         case 0:
           if (reg >= REG_XPR0 && reg <= REG_XPR31) {
-            if (gs.xlen == 32) {
-              gs.dr_write32(0, sw(reg - REG_XPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
-            } else {
-              gs.dr_write32(0, sd(reg - REG_XPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
+            unsigned int i = 0;
+            if (reg == S0) {
+                gs.dr_write32(i++, csrr(S0, CSR_DSCRATCH));
             }
-            gs.dr_write_jump(1);
+            if (gs.xlen == 32) {
+              gs.dr_write32(i++, sw(reg - REG_XPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
+            } else {
+              gs.dr_write32(i++, sd(reg - REG_XPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
+            }
+            gs.dr_write_jump(i);
           } else if (reg == REG_PC) {
             gs.start_packet();
             if (gs.xlen == 32) {
@@ -609,13 +612,25 @@ class register_read_op_t : public operation_t
             gs.end_packet();
             return true;
           } else if (reg >= REG_FPR0 && reg <= REG_FPR31) {
-            // send(p->state.FPR[reg - REG_FPR0]);
+            gs.dr_write_load(0, S0, SLOT_DATA1);
+            gs.dr_write(SLOT_DATA1, set_field(gs.mstatus, MSTATUS_FS, 1));
+            gs.dr_write32(1, csrw(S0, CSR_MSTATUS));
+            gs.mstatus_dirty = true;
             if (gs.xlen == 32) {
-              gs.dr_write32(0, fsw(reg - REG_FPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
+              gs.dr_write32(2, fsw(reg - REG_FPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
             } else {
-              gs.dr_write32(0, fsd(reg - REG_FPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
+              gs.dr_write32(2, fsd(reg - REG_FPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
             }
-            gs.dr_write_jump(1);
+            gs.dr_write_jump(3);
+          } else if (reg == REG_MSTATUS) {
+            gs.start_packet();
+            if (gs.xlen == 32) {
+              gs.send((uint32_t) gs.mstatus);
+            } else {
+              gs.send(gs.mstatus);
+            }
+            gs.end_packet();
+            return true;
           } else if (reg >= REG_CSR0 && reg <= REG_CSR4095) {
             gs.dr_write32(0, csrr(S0, reg - REG_CSR0));
             gs.dr_write_store(1, S0, SLOT_DATA0);
@@ -636,14 +651,21 @@ class register_read_op_t : public operation_t
           return false;
 
         case 1:
-          gs.start_packet();
-          if (gs.xlen == 32) {
-            gs.send(gs.dr_read32(4));
-          } else {
-            gs.send(gs.dr_read(SLOT_DATA0));
+          {
+            unsigned result = gs.dr_read32(DEBUG_RAM_SIZE / 4 - 1);
+            if (result) {
+              gs.send_packet("E03");
+              return true;
+            }
+            gs.start_packet();
+            if (gs.xlen == 32) {
+              gs.send(gs.dr_read32(4));
+            } else {
+              gs.send(gs.dr_read(SLOT_DATA0));
+            }
+            gs.end_packet();
+            return true;
           }
-          gs.end_packet();
-          return true;
       }
       return false;
     }
@@ -660,44 +682,67 @@ class register_write_op_t : public operation_t
 
     bool perform_step(unsigned int step)
     {
-      gs.dr_write_load(0, S0, SLOT_DATA0);
-      gs.dr_write(SLOT_DATA0, value);
-      if (reg == S0) {
-        gs.dr_write32(1, csrw(S0, CSR_DSCRATCH));
-        gs.dr_write_jump(2);
-      } else if (reg == S1) {
-        gs.dr_write_store(1, S0, SLOT_DATA_LAST);
-        gs.dr_write_jump(2);
-      } else if (reg >= REG_XPR0 && reg <= REG_XPR31) {
-        gs.dr_write32(1, addi(reg, S0, 0));
-        gs.dr_write_jump(2);
-      } else if (reg == REG_PC) {
-        gs.dpc = value;
-        return true;
-      } else if (reg >= REG_FPR0 && reg <= REG_FPR31) {
-        if (gs.xlen == 32) {
-          gs.dr_write32(0, flw(reg - REG_FPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
-        } else {
-          gs.dr_write32(0, fld(reg - REG_FPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
-        }
-        gs.dr_write_jump(1);
-      } else if (reg >= REG_CSR0 && reg <= REG_CSR4095) {
-        gs.dr_write32(1, csrw(S0, reg - REG_CSR0));
-        gs.dr_write_jump(2);
-        if (reg == REG_CSR0 + CSR_SPTBR) {
-          gs.sptbr = value;
-          gs.sptbr_valid = true;
-        }
-      } else if (reg == REG_PRIV) {
-        gs.dcsr = set_field(gs.dcsr, DCSR_PRV, value);
-        return true;
-      } else {
-        gs.send_packet("E02");
-        return true;
+      switch (step) {
+        case 0:
+          gs.dr_write_load(0, S0, SLOT_DATA0);
+          gs.dr_write(SLOT_DATA0, value);
+          if (reg == S0) {
+            gs.dr_write32(1, csrw(S0, CSR_DSCRATCH));
+            gs.dr_write_jump(2);
+          } else if (reg == S1) {
+            gs.dr_write_store(1, S0, SLOT_DATA_LAST);
+            gs.dr_write_jump(2);
+          } else if (reg >= REG_XPR0 && reg <= REG_XPR31) {
+            gs.dr_write32(1, addi(reg, S0, 0));
+            gs.dr_write_jump(2);
+          } else if (reg == REG_PC) {
+            gs.dpc = value;
+            return true;
+          } else if (reg >= REG_FPR0 && reg <= REG_FPR31) {
+            gs.dr_write_load(0, S0, SLOT_DATA1);
+            gs.dr_write(SLOT_DATA1, set_field(gs.mstatus, MSTATUS_FS, 1));
+            gs.dr_write32(1, csrw(S0, CSR_MSTATUS));
+            gs.mstatus_dirty = true;
+            if (gs.xlen == 32) {
+              gs.dr_write32(2, flw(reg - REG_FPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
+            } else {
+              gs.dr_write32(2, fld(reg - REG_FPR0, 0, (uint16_t) DEBUG_RAM_START + 16));
+            }
+            gs.dr_write_jump(3);
+          } else if (reg == REG_MSTATUS) {
+            gs.mstatus = value;
+            gs.mstatus_dirty = true;
+            return true;
+          } else if (reg >= REG_CSR0 && reg <= REG_CSR4095) {
+            gs.dr_write32(1, csrw(S0, reg - REG_CSR0));
+            gs.dr_write_jump(2);
+            if (reg == REG_CSR0 + CSR_SPTBR) {
+              gs.sptbr = value;
+              gs.sptbr_valid = true;
+            }
+          } else if (reg == REG_PRIV) {
+            gs.dcsr = set_field(gs.dcsr, DCSR_PRV, value);
+            return true;
+          } else {
+            gs.send_packet("E02");
+            return true;
+          }
+          gs.set_interrupt(0);
+          return false;
+
+        case 1:
+          {
+            unsigned result = gs.dr_read32(DEBUG_RAM_SIZE / 4 - 1);
+            if (result) {
+              gs.send_packet("E03");
+              return true;
+            }
+            gs.send_packet("OK");
+            return true;
+          }
       }
-      gs.set_interrupt(0);
-      gs.send_packet("OK");
-      return true;
+
+      assert(0);
     }
 
   private:
@@ -713,9 +758,9 @@ class memory_read_op_t : public operation_t
     memory_read_op_t(gdbserver_t& gdbserver, reg_t vaddr, unsigned int length,
         unsigned char *data=NULL) :
       operation_t(gdbserver), vaddr(vaddr), length(length), data(data), index(0)
-    {
-      buf = new uint8_t[length];
-    };
+  {
+    buf = new uint8_t[length];
+  };
 
     ~memory_read_op_t()
     {
@@ -837,8 +882,8 @@ class memory_write_op_t : public operation_t
       if (step == 0) {
         access_size = gs.find_access_size(paddr, length);
 
-        D(fprintf(stderr, "write to 0x%lx -> 0x%lx (access=%d): ", vaddr, paddr,
-            access_size));
+        D(fprintf(stderr, "write to 0x%" PRIx64 " -> 0x%" PRIx64 " (access=%d): ",
+              vaddr, paddr, access_size));
         for (unsigned int i = 0; i < length; i++) {
           D(fprintf(stderr, "%02x", data[i]));
         }
@@ -942,40 +987,6 @@ class collect_translation_info_op_t : public operation_t
 
     bool perform_step(unsigned int step)
     {
-      unsigned int vm = gs.virtual_memory();
-
-      if (step == 0) {
-        switch (vm) {
-          case VM_MBARE:
-            // Nothing to be done.
-            return true;
-
-          case VM_SV32:
-            levels = 2;
-            ptidxbits = 10;
-            ptesize = 4;
-            break;
-          case VM_SV39:
-            levels = 3;
-            ptidxbits = 9;
-            ptesize = 8;
-            break;
-          case VM_SV48:
-            levels = 4;
-            ptidxbits = 9;
-            ptesize = 8;
-            break;
-
-          default:
-            {
-              char buf[100];
-              sprintf(buf, "VM mode %d is not supported by gdbserver.cc.", vm);
-              die(buf);
-              return true;        // die doesn't return, but gcc doesn't know that.
-            }
-        }
-      }
-
       // Perform any reads from the just-completed action.
       switch (state) {
         case STATE_START:
@@ -983,15 +994,19 @@ class collect_translation_info_op_t : public operation_t
         case STATE_READ_SPTBR:
           gs.sptbr = gs.dr_read(SLOT_DATA0);
           gs.sptbr_valid = true;
+          vm = decode_vm_info(gs.xlen, gs.privilege_mode(), gs.sptbr);
+          if (vm.levels == 0)
+            return true;
           break;
         case STATE_READ_PTE:
-          if (ptesize == 4) {
+          if (vm.ptesize == 4) {
               gs.pte_cache[pte_addr] = gs.dr_read32(4);
           } else {
               gs.pte_cache[pte_addr] = ((uint64_t) gs.dr_read32(5) << 32) |
                   gs.dr_read32(4);
           }
-          D(fprintf(stderr, "pte_cache[0x%lx] = 0x%lx\n", pte_addr, gs.pte_cache[pte_addr]));
+          D(fprintf(stderr, "pte_cache[0x%" PRIx64 "] = 0x%" PRIx64 "\n", pte_addr,
+                    gs.pte_cache[pte_addr]));
           break;
       }
 
@@ -1007,16 +1022,16 @@ class collect_translation_info_op_t : public operation_t
         return false;
       }
 
-      reg_t base = gs.sptbr << PGSHIFT;
-      int ptshift = (levels - 1) * ptidxbits;
-      for (unsigned int i = 0; i < levels; i++, ptshift -= ptidxbits) {
-        reg_t idx = (vaddr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
+      reg_t base = vm.ptbase;
+      for (int i = vm.levels - 1; i >= 0; i--) {
+        int ptshift = i * vm.idxbits;
+        reg_t idx = (vaddr >> (PGSHIFT + ptshift)) & ((1 << vm.idxbits) - 1);
 
-        pte_addr = base + idx * ptesize;
+        pte_addr = base + idx * vm.ptesize;
         auto it = gs.pte_cache.find(pte_addr);
         if (it == gs.pte_cache.end()) {
           state = STATE_READ_PTE;
-          if (ptesize == 4) {
+          if (vm.ptesize == 4) {
             gs.dr_write32(0, lw(S0, 0, (uint16_t) DEBUG_RAM_START + 16));
             gs.dr_write32(1, lw(S1, S0, 0));
             gs.dr_write32(2, sw(S1, 0, (uint16_t) DEBUG_RAM_START + 16));
@@ -1026,7 +1041,7 @@ class collect_translation_info_op_t : public operation_t
             gs.dr_write32(1, ld(S1, S0, 0));
             gs.dr_write32(2, sd(S1, 0, (uint16_t) DEBUG_RAM_START + 16));
           }
-          gs.dr_write32(3, jal(0, (uint32_t) (DEBUG_ROM_RESUME - (DEBUG_RAM_START + 4*3))));
+          gs.dr_write_jump(3);
           gs.dr_write32(4, pte_addr);
           gs.dr_write32(5, pte_addr >> 32);
           gs.set_interrupt(0);
@@ -1057,9 +1072,7 @@ class collect_translation_info_op_t : public operation_t
     } state;
     reg_t vaddr;
     size_t length;
-    unsigned int levels;
-    unsigned int ptidxbits;
-    unsigned int ptesize;
+    vm_info vm;
     reg_t pte_addr;
 };
 
@@ -1218,6 +1231,21 @@ class maybe_restore_tselect_op_t : public operation_t
     }
 };
 
+class maybe_restore_mstatus_op_t : public operation_t
+{
+  public:
+    maybe_restore_mstatus_op_t(gdbserver_t& gdbserver) : operation_t(gdbserver) {};
+    bool perform_step(unsigned int step) {
+      if (gs.mstatus_dirty) {
+        gs.dr_write_load(0, S0, SLOT_DATA1);
+        gs.dr_write32(1, csrw(S0, CSR_MSTATUS));
+        gs.dr_write_jump(2);
+        gs.dr_write(SLOT_DATA1, gs.mstatus);
+      }
+      return true;
+    }
+};
+
 class hardware_breakpoint_remove_op_t : public operation_t
 {
   public:
@@ -1244,7 +1272,8 @@ gdbserver_t::gdbserver_t(uint16_t port, sim_t *sim) :
   xlen(0),
   sim(sim),
   client_fd(0),
-  recv_buf(64 * 1024), send_buf(64 * 1024)
+  // gdb likes to send 0x100000 bytes at once when downloading.
+  recv_buf(0x180000), send_buf(64 * 1024)
 {
   socket_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (socket_fd == -1) {
@@ -1289,46 +1318,18 @@ unsigned int gdbserver_t::find_access_size(reg_t address, int length)
 
 reg_t gdbserver_t::translate(reg_t vaddr)
 {
-  unsigned int vm = virtual_memory();
-  unsigned int levels, ptidxbits, ptesize;
-
-  switch (vm) {
-    case VM_MBARE:
-      return vaddr;
-
-    case VM_SV32:
-      levels = 2;
-      ptidxbits = 10;
-      ptesize = 4;
-      break;
-    case VM_SV39:
-      levels = 3;
-      ptidxbits = 9;
-      ptesize = 8;
-      break;
-    case VM_SV48:
-      levels = 4;
-      ptidxbits = 9;
-      ptesize = 8;
-      break;
-
-    default:
-      {
-        char buf[100];
-        sprintf(buf, "VM mode %d is not supported by gdbserver.cc.", vm);
-        die(buf);
-        return true;        // die doesn't return, but gcc doesn't know that.
-      }
-  }
+  vm_info vm = decode_vm_info(xlen, privilege_mode(), sptbr);
+  if (vm.levels == 0)
+    return vaddr;
 
   // Handle page tables here. There's a bunch of duplicated code with
   // collect_translation_info_op_t. :-(
-  reg_t base = sptbr << PGSHIFT;
-  int ptshift = (levels - 1) * ptidxbits;
-  for (unsigned int i = 0; i < levels; i++, ptshift -= ptidxbits) {
-    reg_t idx = (vaddr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
+  reg_t base = vm.ptbase;
+  for (int i = vm.levels - 1; i >= 0; i--) {
+    int ptshift = i * vm.idxbits;
+    reg_t idx = (vaddr >> (PGSHIFT + ptshift)) & ((1 << vm.idxbits) - 1);
 
-    reg_t pte_addr = base + idx * ptesize;
+    reg_t pte_addr = base + idx * vm.ptesize;
     auto it = pte_cache.find(pte_addr);
     if (it == pte_cache.end()) {
       fprintf(stderr, "ERROR: gdbserver tried to translate 0x%016" PRIx64
@@ -1346,7 +1347,7 @@ reg_t gdbserver_t::translate(reg_t vaddr)
       reg_t vpn = vaddr >> PGSHIFT;
       reg_t paddr = (ppn | (vpn & ((reg_t(1) << ptshift) - 1))) << PGSHIFT;
       paddr += vaddr & (PGSIZE-1);
-      D(fprintf(stderr, "gdbserver translate 0x%lx -> 0x%lx\n", vaddr, paddr));
+      D(fprintf(stderr, "gdbserver translate 0x%" PRIx64 " -> 0x%" PRIx64 "\n", vaddr, paddr));
       return paddr;
     }
   }
@@ -1363,14 +1364,6 @@ unsigned int gdbserver_t::privilege_mode()
   if (get_field(mstatus, MSTATUS_MPRV))
     mode = get_field(mstatus, MSTATUS_MPP);
   return mode;
-}
-
-unsigned int gdbserver_t::virtual_memory()
-{
-  unsigned int mode = privilege_mode();
-  if (mode == PRV_M)
-    return VM_MBARE;
-  return get_field(mstatus, MSTATUS_VM);
 }
 
 void gdbserver_t::dr_write32(unsigned int index, uint32_t value)
@@ -1504,7 +1497,6 @@ void gdbserver_t::read()
   // available.
 
   size_t count = recv_buf.contiguous_empty_size();
-  assert(count > 0);
   ssize_t bytes = ::read(client_fd, recv_buf.contiguous_empty(), count);
   if (bytes == -1) {
     if (errno == EAGAIN) {
@@ -1541,8 +1533,8 @@ void gdbserver_t::write()
       // Client can't take any more data right now.
       break;
     } else {
-      D(fprintf(stderr, "wrote %ld bytes: ", bytes));
-      for (unsigned int i = 0; i < bytes; i++) {
+      D(fprintf(stderr, "wrote %zd bytes: ", bytes));
+      for (int i = 0; i < bytes; i++) {
         D(fprintf(stderr, "%c", send_buf[i]));
       }
       D(fprintf(stderr, "\n"));
@@ -1612,7 +1604,7 @@ void gdbserver_t::process_requests()
       if (b == '$') {
         // Start of new packet.
         if (!packet.empty()) {
-          fprintf(stderr, "Received malformed %ld-byte packet from debug client: ",
+          fprintf(stderr, "Received malformed %zd-byte packet from debug client: ",
               packet.size());
           print_packet(packet);
           recv_buf.consume(i);
@@ -1636,6 +1628,25 @@ void gdbserver_t::process_requests()
     if (packet.size()) {
       break;
     }
+  }
+
+  if (recv_buf.full()) {
+    fprintf(stderr,
+        "Receive buffer is full, but no complete packet was found!\n");
+    for (unsigned line = 0; line < 8; line++) {
+      for (unsigned i = 0; i < 16; i++) {
+        fprintf(stderr, "%02x ", recv_buf.entry(line * 16 + i));
+      }
+      for (unsigned i = 0; i < 16; i++) {
+        uint8_t e = recv_buf.entry(line * 16 + i);
+        if (e >= ' ' && e <= '~')
+          fprintf(stderr, "%c", e);
+        else
+          fprintf(stderr, ".");
+      }
+      fprintf(stderr, "\n");
+    }
+    assert(!recv_buf.full());
   }
 }
 
@@ -1693,10 +1704,10 @@ uint64_t gdbserver_t::consume_hex_number_le(
     else
       shift -= 4;
   }
-  if (shift >= xlen) {
+  if (shift > (xlen+4)) {
     fprintf(stderr,
-        "gdb sent too many data bytes. That means it thinks XLEN is greater than %d.\n"
-        "To fix that, tell gdb: set arch riscv:rv%d\n",
+        "gdb sent too many data bytes. That means it thinks XLEN is greater "
+        "than %d.\nTo fix that, tell gdb: set arch riscv:rv%d\n",
         xlen, xlen);
   }
   return value;
@@ -1740,8 +1751,6 @@ void gdbserver_t::handle_register_write(const std::vector<uint8_t> &packet)
   processor_t *p = sim->get_core(0);
 
   add_operation(new register_write_op_t(*this, n, value));
-
-  return send_packet("OK");
 }
 
 void gdbserver_t::handle_memory_read(const std::vector<uint8_t> &packet)
@@ -1818,6 +1827,7 @@ void gdbserver_t::handle_continue(const std::vector<uint8_t> &packet)
   }
 
   add_operation(new maybe_restore_tselect_op_t(*this));
+  add_operation(new maybe_restore_mstatus_op_t(*this));
   add_operation(new continue_op_t(*this, false));
 }
 
@@ -1858,13 +1868,13 @@ void gdbserver_t::software_breakpoint_insert(reg_t vaddr, unsigned int size)
   add_operation(new collect_translation_info_op_t(*this, vaddr, size));
   unsigned char* inst = new unsigned char[4];
   if (size == 2) {
-    inst[0] = C_EBREAK & 0xff;
-    inst[1] = (C_EBREAK >> 8) & 0xff;
+    inst[0] = MATCH_C_EBREAK & 0xff;
+    inst[1] = (MATCH_C_EBREAK >> 8) & 0xff;
   } else {
-    inst[0] = EBREAK & 0xff;
-    inst[1] = (EBREAK >> 8) & 0xff;
-    inst[2] = (EBREAK >> 16) & 0xff;
-    inst[3] = (EBREAK >> 24) & 0xff;
+    inst[0] = MATCH_EBREAK & 0xff;
+    inst[1] = (MATCH_EBREAK >> 8) & 0xff;
+    inst[2] = (MATCH_EBREAK >> 16) & 0xff;
+    inst[3] = (MATCH_EBREAK >> 24) & 0xff;
   }
 
   software_breakpoint_t bp = {
@@ -2004,14 +2014,14 @@ void gdbserver_t::handle_query(const std::vector<uint8_t> &packet)
 void gdbserver_t::handle_packet(const std::vector<uint8_t> &packet)
 {
   if (compute_checksum(packet) != extract_checksum(packet)) {
-    fprintf(stderr, "Received %ld-byte packet with invalid checksum\n", packet.size());
+    fprintf(stderr, "Received %zd-byte packet with invalid checksum\n", packet.size());
     fprintf(stderr, "Computed checksum: %x\n", compute_checksum(packet));
     print_packet(packet);
     send("-");
     return;
   }
 
-  D(fprintf(stderr, "Received %ld-byte packet from debug client: ", packet.size()));
+  D(fprintf(stderr, "Received %zd-byte packet from debug client: ", packet.size()));
   D(print_packet(packet));
   send("+");
 

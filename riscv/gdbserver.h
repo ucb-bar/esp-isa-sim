@@ -25,6 +25,7 @@ public:
   unsigned int size() const;
   bool empty() const { return start == end; }
   bool full() const { return ((end+1) % capacity) == start; }
+  T entry(unsigned index) { return data[(start + index) % capacity]; }
 
   // Return size and address of the block of RAM where more data can be copied
   // to be added to the buffer.
@@ -216,6 +217,7 @@ public:
   reg_t dpc;
   reg_t dcsr;
   reg_t mstatus;
+  bool mstatus_dirty;
   reg_t sptbr;
   bool sptbr_valid;
   reg_t tselect;
@@ -228,9 +230,6 @@ public:
   // Return the PRV_x that is used when the code under debug performs a memory
   // access.
   unsigned int privilege_mode();
-  // Return the VM_x that is used when the code under debug performs a memory
-  // access.
-  unsigned int virtual_memory();
 
   unsigned int xlen;
 
