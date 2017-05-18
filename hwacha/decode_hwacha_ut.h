@@ -95,7 +95,7 @@ static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
 #define FRS1 RS1
 #define FRS2 RS2
 #define FRS3 RS3
-#define WRITE_FRD(value) WRITE_RD(value)
+#define WRITE_FRD(value) WRITE_RD(freg(value).v)
 
 
 // we assume the vector unit has floating-point alus
@@ -109,7 +109,7 @@ static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
 #define HFRS3 cvt_hs(FRS3)
 
 #define WRITE_SFRD(value) WRITE_RD((sreg_t)((int32_t)(value)))
-#define WRITE_HFRD(value) WRITE_RD((sreg_t)((int16_t)cvt_sh(value, RM)))
+#define WRITE_HFRD(value) WRITE_RD((sreg_t)((int16_t)cvt_sh(freg(value).v, RM)))
 
 #define VEC_SEG_LOAD VEC_UT_SEG_LOAD
 #define VEC_SEG_ST_LOAD VEC_UT_SEG_ST_LOAD

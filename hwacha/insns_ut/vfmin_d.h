@@ -1,4 +1,5 @@
 require_fp;
-WRITE_FRD(isNaNF64UI(FRS2) || f64_lt_quiet(f64(FRS1),f64(FRS2)) /* && FRS1 not NaN */
-      ? FRS1 : FRS2);
+WRITE_FRD(f64_lt_quiet(f64(FRS1), f64(FRS2)) || isNaNF64UI(f64(FRS2).v) ? f64(FRS1) : f64(FRS2));
+if ((isNaNF64UI(f64(FRS1).v) && isNaNF64UI(f64(FRS2).v)) || softfloat_exceptionFlags)
+  WRITE_FRD(f64(defaultNaNF64UI));
 set_fp_exceptions;

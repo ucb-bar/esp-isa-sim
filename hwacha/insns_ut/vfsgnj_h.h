@@ -1,2 +1,2 @@
 require_fp;
-WRITE_FRD((FRS1 &~ (uint16_t)INT16_MIN) | (FRS2 & (uint16_t)INT16_MIN));
+WRITE_HFRD(fsgnj32(HFRS1, HFRS2, false, false));

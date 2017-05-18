@@ -1,2 +1,2 @@
 require_fp;
-WRITE_FRD((FRS1 &~ INT64_MIN) | (FRS2 & INT64_MIN));
+WRITE_FRD(fsgnj64(FRS1, FRS2, false, false));
