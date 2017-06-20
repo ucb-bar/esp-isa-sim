@@ -7,7 +7,6 @@
 #include "sim.h"
 #include "mmu.h"
 #include "disasm.h"
-#include "gdbserver.h"
 #include <cinttypes>
 #include <cmath>
 #include <cstdlib>
@@ -22,7 +21,8 @@
 
 processor_t::processor_t(const char* isa, sim_t* sim, uint32_t id,
         bool halt_on_reset)
-  : debug(false), sim(sim), ext(NULL), id(id), halt_on_reset(halt_on_reset)
+  : debug(false), halt_request(false), sim(sim), ext(NULL), id(id),
+  halt_on_reset(halt_on_reset)
 {
   parse_isa_string(isa);
   register_base_instructions();
@@ -178,6 +178,15 @@ void processor_t::take_interrupt(reg_t pending_interrupts)
     throw trap_t(((reg_t)1 << (max_xlen-1)) | ctz(enabled_interrupts));
 }
 
+static int xlen_to_uxl(int xlen)
+{
+  if (xlen == 32)
+    return 1;
+  if (xlen == 64)
+    return 2;
+  abort();
+}
+
 void processor_t::set_privilege(reg_t prv)
 {
   assert(prv <= PRV_M);
@@ -193,7 +202,7 @@ void processor_t::enter_debug_mode(uint8_t cause)
   state.dcsr.prv = state.prv;
   set_privilege(PRV_M);
   state.dpc = state.pc;
-  state.pc = DEBUG_ROM_START;
+  state.pc = debug_rom_entry();
 }
 
 void processor_t::take_trap(trap_t& t, reg_t epc)
@@ -206,17 +215,21 @@ void processor_t::take_trap(trap_t& t, reg_t epc)
           t.get_badaddr());
   }
 
+  if (state.dcsr.cause) {
+    if (t.cause() == CAUSE_BREAKPOINT) {
+      state.pc = debug_rom_entry();
+    } else {
+      state.pc = DEBUG_ROM_TVEC;
+    }
+    return;
+  }
+
   if (t.cause() == CAUSE_BREAKPOINT && (
               (state.prv == PRV_M && state.dcsr.ebreakm) ||
               (state.prv == PRV_H && state.dcsr.ebreakh) ||
               (state.prv == PRV_S && state.dcsr.ebreaks) ||
               (state.prv == PRV_U && state.dcsr.ebreaku))) {
     enter_debug_mode(DCSR_CAUSE_SWBP);
-    return;
-  }
-
-  if (state.dcsr.cause) {
-    state.pc = DEBUG_ROM_EXCEPTION;
     return;
   }
 
@@ -261,9 +274,23 @@ void processor_t::take_trap(trap_t& t, reg_t epc)
 
 void processor_t::disasm(insn_t insn)
 {
+  static uint64_t last_pc = 1, last_bits;
+  static uint64_t executions = 1;
+
   uint64_t bits = insn.bits() & ((1ULL << (8 * insn_length(insn.bits()))) - 1);
-  fprintf(stderr, "core %3d: 0x%016" PRIx64 " (0x%08" PRIx64 ") %s\n",
-          id, state.pc, bits, disassembler->disassemble(insn).c_str());
+  if (last_pc != state.pc || last_bits != bits) {
+    if (executions != 1) {
+      fprintf(stderr, "core %3d: Executed %" PRIx64 " times\n", id, executions);
+    }
+
+    fprintf(stderr, "core %3d: 0x%016" PRIx64 " (0x%08" PRIx64 ") %s\n",
+            id, state.pc, bits, disassembler->disassemble(insn).c_str());
+    last_pc = state.pc;
+    last_bits = bits;
+    executions = 1;
+  } else {
+    executions++;
+  }
 }
 
 int processor_t::paddr_bits()
@@ -300,7 +327,8 @@ void processor_t::set_csr(int which, reg_t val)
       reg_t mask = MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_MIE | MSTATUS_MPIE
                  | MSTATUS_SPP | MSTATUS_FS | MSTATUS_MPRV | MSTATUS_SUM
                  | MSTATUS_MPP | MSTATUS_MXR | MSTATUS_TW | MSTATUS_TVM
-                 | MSTATUS_TSR | (ext ? MSTATUS_XS : 0);
+                 | MSTATUS_TSR | MSTATUS_UXL | MSTATUS_SXL |
+                 (ext ? MSTATUS_XS : 0);
 
       state.mstatus = (state.mstatus & ~mask) | (val & mask);
 
@@ -311,8 +339,9 @@ void processor_t::set_csr(int which, reg_t val)
       else
         state.mstatus = set_field(state.mstatus, MSTATUS64_SD, dirty);
 
-      // spike supports the notion of xlen < max_xlen, but current priv spec
-      // doesn't provide a mechanism to run RV32 software on an RV64 machine
+      state.mstatus = set_field(state.mstatus, MSTATUS_UXL, xlen_to_uxl(max_xlen));
+      state.mstatus = set_field(state.mstatus, MSTATUS_SXL, xlen_to_uxl(max_xlen));
+      // U-XLEN == S-XLEN == M-XLEN
       xlen = max_xlen;
       break;
     }
@@ -513,7 +542,7 @@ reg_t processor_t::get_csr(int which)
     case CSR_MCOUNTEREN: return state.mcounteren;
     case CSR_SSTATUS: {
       reg_t mask = SSTATUS_SIE | SSTATUS_SPIE | SSTATUS_SPP | SSTATUS_FS
-                 | SSTATUS_XS | SSTATUS_SUM;
+                 | SSTATUS_XS | SSTATUS_SUM | SSTATUS_UXL;
       reg_t sstatus = state.mstatus & mask;
       if ((sstatus & SSTATUS_FS) == SSTATUS_FS ||
           (sstatus & SSTATUS_XS) == SSTATUS_XS)
@@ -586,19 +615,15 @@ reg_t processor_t::get_csr(int which)
       {
         uint32_t v = 0;
         v = set_field(v, DCSR_XDEBUGVER, 1);
-        v = set_field(v, DCSR_NDRESET, 0);
-        v = set_field(v, DCSR_FULLRESET, 0);
-        v = set_field(v, DCSR_PRV, state.dcsr.prv);
-        v = set_field(v, DCSR_STEP, state.dcsr.step);
-        v = set_field(v, DCSR_DEBUGINT, sim->debug_module.get_interrupt(id));
-        v = set_field(v, DCSR_STOPCYCLE, 0);
-        v = set_field(v, DCSR_STOPTIME, 0);
         v = set_field(v, DCSR_EBREAKM, state.dcsr.ebreakm);
         v = set_field(v, DCSR_EBREAKH, state.dcsr.ebreakh);
         v = set_field(v, DCSR_EBREAKS, state.dcsr.ebreaks);
         v = set_field(v, DCSR_EBREAKU, state.dcsr.ebreaku);
-        v = set_field(v, DCSR_HALT, state.dcsr.halt);
+        v = set_field(v, DCSR_STOPCYCLE, 0);
+        v = set_field(v, DCSR_STOPTIME, 0);
         v = set_field(v, DCSR_CAUSE, state.dcsr.cause);
+        v = set_field(v, DCSR_STEP, state.dcsr.step);
+        v = set_field(v, DCSR_PRV, state.dcsr.prv);
         return v;
       }
     case CSR_DPC:
