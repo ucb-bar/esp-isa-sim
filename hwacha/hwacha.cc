@@ -72,31 +72,53 @@ static reg_t custom(processor_t* p, insn_t insn, reg_t pc)
   }
   catch (trap_instruction_access_fault& t)
   {
+#ifdef RISCV_ENABLE_HCOMMITLOG
+    fprintf(stderr,"H: INST ACCESS FAULT\n");
+#endif
     h->take_exception(HWACHA_CAUSE_VF_FAULT_FETCH, h->get_ct_state()->vf_pc);
   }
   catch (trap_illegal_instruction& t)
   {
+#ifdef RISCV_ENABLE_HCOMMITLOG
+    fprintf(stderr,"H: ILL INST\n");
+#endif
     h->take_exception(HWACHA_CAUSE_VF_ILLEGAL_INSTRUCTION, h->get_ct_state()->vf_pc);
   }
   catch (trap_load_address_misaligned& t)
   {
+#ifdef RISCV_ENABLE_HCOMMITLOG
+    fprintf(stderr,"H: LOAD MISALIGNED\n");
+#endif
     h->take_exception(HWACHA_CAUSE_MISALIGNED_LOAD, t.get_badaddr());
   }
   catch (trap_store_address_misaligned& t)
   {
+#ifdef RISCV_ENABLE_HCOMMITLOG
+    fprintf(stderr,"H: STORE MISALIGNED\n");
+#endif
     h->take_exception(HWACHA_CAUSE_MISALIGNED_STORE, t.get_badaddr());
   }
   catch (trap_load_access_fault& t)
   {
+#ifdef RISCV_ENABLE_HCOMMITLOG
+    fprintf(stderr,"H: LOAD ACCESS FAULT\n");
+#endif
     h->take_exception(HWACHA_CAUSE_FAULT_LOAD, t.get_badaddr());
   }
   catch (trap_store_access_fault& t)
   {
+#ifdef RISCV_ENABLE_HCOMMITLOG
+    fprintf(stderr,"H: STORE ACCESS FAULT\n");
+#endif
     h->take_exception(HWACHA_CAUSE_FAULT_STORE, t.get_badaddr());
   }
 
-  if (!matched)
+  if (!matched) {
+#ifdef RISCV_ENABLE_HCOMMITLOG
+    fprintf(stderr,"H: VERY ILL INST\n");
+#endif
     h->take_exception(HWACHA_CAUSE_ILLEGAL_INSTRUCTION, uint32_t(insn.bits()));
+  }
 
   return npc;
 }
@@ -122,6 +144,9 @@ bool hwacha_t::vf_active()
 
 void hwacha_t::take_exception(reg_t c, reg_t a)
 {
+#ifdef RISCV_ENABLE_HCOMMITLOG
+  fprintf(stderr,"H: EXCPT cause:%d aux %d \n", c, a);
+#endif
   cause = c;
   aux = a;
   raise_interrupt();
