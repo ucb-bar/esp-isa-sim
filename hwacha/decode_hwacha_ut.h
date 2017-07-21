@@ -117,6 +117,17 @@ static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
 #define VEC_UT_SEG_LOAD(dst, func, inc) \
   VEC_UT_SEG_ST_LOAD(dst, func, INSN_VSEG*inc, inc)
 
+#ifdef RISCV_ENABLE_HCOMMITLOG
+#define VEC_UT_SEG_ST_LOAD(dst, func, stride, inc) \
+  if(VPRED) { \
+    reg_t addr = ARS1+stride*UTIDX; \
+    for (uint32_t j=0; j<INSN_VSEG; j++) { \
+      printf("HMEM: read from %016lx\n", addr); \
+      UT_WRITE_##dst(UTIDX, INSN_VRD+j, p->get_mmu()->func(addr)); \
+      addr += inc; \
+    } \
+  }
+#else
 #define VEC_UT_SEG_ST_LOAD(dst, func, stride, inc) \
   if(VPRED) { \
     reg_t addr = ARS1+stride*UTIDX; \
@@ -124,7 +135,8 @@ static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
       UT_WRITE_##dst(UTIDX, INSN_VRD+j, p->get_mmu()->func(addr)); \
       addr += inc; \
     } \
-  } \
+  }
+#endif
 
 
 #define VEC_SEG_STORE VEC_UT_SEG_STORE
@@ -133,13 +145,27 @@ static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
 #define VEC_UT_SEG_STORE(src, func, inc) \
   VEC_UT_SEG_ST_STORE(src, func, INSN_VSEG*inc, inc)
 
+#ifdef RISCV_ENABLE_HCOMMITLOG
 #define VEC_UT_SEG_ST_STORE(src, func, stride, inc) \
   if(VPRED) { \
     reg_t addr = ARS1+stride*UTIDX; \
     for (uint32_t j=0; j<INSN_VSEG; j++) { \
-      p->get_mmu()->func(addr, UT_READ_##src(UTIDX, INSN_VRD+j)); \
+      reg_t stval = UT_READ_##src(UTIDX, INSN_VRD+j); \
+      printf("HMEM: write %016lx with %016lx\n", addr, stval); \
+      p->get_mmu()->func(addr, stval); \
       addr += inc; \
     } \
-  } \
+  }
+#else
+#define VEC_UT_SEG_ST_STORE(src, func, stride, inc) \
+  if(VPRED) { \
+    reg_t addr = ARS1+stride*UTIDX; \
+    for (uint32_t j=0; j<INSN_VSEG; j++) { \
+      reg_t stval = UT_READ_##src(UTIDX, INSN_VRD+j); \
+      p->get_mmu()->func(addr, stval); \
+      addr += inc; \
+    } \
+  }
+#endif
 
 #endif
