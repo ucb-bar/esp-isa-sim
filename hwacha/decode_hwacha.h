@@ -45,7 +45,7 @@
 #define INSN_VS1   (insn.vs1())
 #define INSN_VS2   (insn.vs2())
 #define INSN_VS3   (insn.vs3())
-#define INSN_SVSRD (insn.svsrd())
+#define INSN_SVSRD (((hwacha_insn_t)insn).svsrd())
 
 static inline reg_t read_spr(hwacha_t* h, insn_t insn, size_t src)
 {
@@ -75,7 +75,7 @@ static inline void write_spr(hwacha_t* h, insn_t insn, size_t dst, reg_t value)
 //Address regs
 #define INSN_VARS1 (insn.vars1())
 #define INSN_VARS2 (insn.vars2())
-#define INSN_SVARD (insn.svard())
+#define INSN_SVARD (((hwacha_insn_t)insn).svard())
 static inline reg_t read_apr(hwacha_t* h, insn_t insn, size_t src)
 {
   if (src >= 32)
@@ -121,7 +121,7 @@ static inline reg_t read_ppr(hwacha_t* h, insn_t insn, uint32_t idx, size_t src)
 #define UT_PRS2(idx) (UT_READ_PPR(idx, INSN_VPRS2))
 #define UT_PRS3(idx) (UT_READ_PPR(idx, INSN_VPRS3))
 
-static inline bool cond_all(hwacha_t* h, insn_t insn, size_t pred){
+static inline bool cond_all(hwacha_t* h, hwacha_insn_t insn, size_t pred){
   for(uint32_t i = 0; i<VL; i++){
     if (!(UT_READ_PPR(i, pred) ^ INSN_VN))
       return false;
@@ -129,7 +129,7 @@ static inline bool cond_all(hwacha_t* h, insn_t insn, size_t pred){
   return true;
 }
 
-static inline bool cond_any(hwacha_t* h, insn_t insn, size_t pred){
+static inline bool cond_any(hwacha_t* h, hwacha_insn_t insn, size_t pred){
   for(uint32_t i = 0; i<VL; i++){
     if (UT_READ_PPR(i, pred) ^ INSN_VN)
       return true;
@@ -137,7 +137,7 @@ static inline bool cond_any(hwacha_t* h, insn_t insn, size_t pred){
   return false;
 }
 
-static inline bool cond(hwacha_t* h, insn_t insn, size_t pred, uint32_t c){
+static inline bool cond(hwacha_t* h, hwacha_insn_t insn, size_t pred, uint32_t c){
   if(c == 0)//all
     return cond_all(h,insn,pred);
   if(c == 1)//any
@@ -150,7 +150,7 @@ static inline bool cond(hwacha_t* h, insn_t insn, size_t pred, uint32_t c){
 #define VPRED (UT_READ_PPR(UTIDX,INSN_VPRED) ^ INSN_VN)
 #define COND  cond(h, insn, INSN_VPRED, INSN_COND)
 
-static inline void write_ppr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst, bool value, bool pred)
+static inline void write_ppr(hwacha_t* h, hwacha_insn_t insn, uint32_t idx, size_t dst, bool value, bool pred)
 {
   if (dst >= h->get_ct_state()->nppr)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
@@ -180,7 +180,7 @@ static inline reg_t read_xpr(hwacha_t* h, insn_t insn, uint32_t idx, size_t src)
   return (h->get_ut_state(idx)->XPR[src]);
 }
 
-static inline void write_xpr(hwacha_t* h, insn_t insn, uint32_t idx, size_t dst, reg_t value, bool pred)
+static inline void write_xpr(hwacha_t* h, hwacha_insn_t insn, uint32_t idx, size_t dst, reg_t value, bool pred)
 {
   if (dst >= h->get_ct_state()->nxpr)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));

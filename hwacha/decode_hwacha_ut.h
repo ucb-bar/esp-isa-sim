@@ -11,28 +11,28 @@
 #undef WRITE_RD
 
 //Do we need this duplication or could we just call read/write_xpr
-static inline reg_t read_vrs1(hwacha_t* h, insn_t insn, uint32_t idx)
+static inline reg_t read_vrs1(hwacha_t* h, hwacha_insn_t insn, uint32_t idx)
 {
   if (INSN_VRS1 >= h->get_ct_state()->nxpr)
     h->take_exception(HWACHA_CAUSE_VF_ILLEGAL_REGID, VF_PC);
   return UT_VRS1(idx);
 }
 
-static inline reg_t read_vrs2(hwacha_t* h, insn_t insn, uint32_t idx)
+static inline reg_t read_vrs2(hwacha_t* h, hwacha_insn_t insn, uint32_t idx)
 {
   if (INSN_VRS2 >= h->get_ct_state()->nxpr)
     h->take_exception(HWACHA_CAUSE_VF_ILLEGAL_REGID, VF_PC);
   return UT_VRS2(idx);
 }
 
-static inline reg_t read_vrs3(hwacha_t* h, insn_t insn, uint32_t idx)
+static inline reg_t read_vrs3(hwacha_t* h, hwacha_insn_t insn, uint32_t idx)
 {
   if (INSN_VRS3 >= h->get_ct_state()->nxpr)
     h->take_exception(HWACHA_CAUSE_VF_ILLEGAL_REGID, VF_PC);
   return UT_VRS3(idx);
 }
 
-static inline void write_vrd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
+static inline void write_vrd(hwacha_t* h, hwacha_insn_t insn, uint32_t idx, reg_t value)
 {
   if (INSN_VRD >= h->get_ct_state()->nxpr)
     h->take_exception(HWACHA_CAUSE_VF_ILLEGAL_REGID, VF_PC);
@@ -50,7 +50,7 @@ static inline void write_vrd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value
 #define READ_PRD UT_READ_PPR(UTIDX, INSN_VRD)
 
 //Generalized register operations (vec/shared) depending on flags
-static inline reg_t read_rs1(hwacha_t* h, insn_t insn, uint32_t idx)
+static inline reg_t read_rs1(hwacha_t* h, hwacha_insn_t insn, uint32_t idx)
 {
   if (INSN_VS1)
     return VRS1;
@@ -58,7 +58,7 @@ static inline reg_t read_rs1(hwacha_t* h, insn_t insn, uint32_t idx)
     return SRS1;
 }
 
-static inline reg_t read_rs2(hwacha_t* h, insn_t insn, uint32_t idx)
+static inline reg_t read_rs2(hwacha_t* h, hwacha_insn_t insn, uint32_t idx)
 {
   if (INSN_VS2)
     return VRS2;
@@ -66,7 +66,7 @@ static inline reg_t read_rs2(hwacha_t* h, insn_t insn, uint32_t idx)
     return SRS2;
 }
 
-static inline reg_t read_rs3(hwacha_t* h, insn_t insn, uint32_t idx)
+static inline reg_t read_rs3(hwacha_t* h, hwacha_insn_t insn, uint32_t idx)
 {
   if (INSN_VS3)
     return VRS3;
@@ -74,7 +74,7 @@ static inline reg_t read_rs3(hwacha_t* h, insn_t insn, uint32_t idx)
     return SRS3;
 }
 
-static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
+static inline void write_rd(hwacha_t* h, hwacha_insn_t insn, uint32_t idx, reg_t value)
 {
   if (INSN_VD)
     WRITE_VRD(value);

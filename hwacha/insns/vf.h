@@ -18,12 +18,12 @@ vf_loop:
     h->take_exception(HWACHA_CAUSE_VF_MISALIGNED_FETCH, VF_PC);
   }
 
-  insn_t ut_insn = p->get_mmu()->load_insn(VF_PC).insn;
+  hwacha_insn_t ut_insn = p->get_mmu()->load_insn(VF_PC).insn;
 
   bool matched = false;
 
   #define DECLARE_INSN(name, match, mask) \
-    extern reg_t hwacha_##name(processor_t*, insn_t, reg_t); \
+    extern reg_t hwacha_##name(processor_t*, hwacha_insn_t, reg_t); \
     if ((ut_insn.bits() & mask) == match) { \
       WRITE_VF_PC(hwacha_##name(p, ut_insn, VF_PC)); \
       matched = true; \

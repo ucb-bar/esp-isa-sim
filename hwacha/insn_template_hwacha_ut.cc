@@ -1,7 +1,7 @@
 // See LICENSE for license details.
 #include "insn_template_hwacha_ut.h"
 
-reg_t hwacha_NAME(processor_t* p, insn_t insn, reg_t pc)
+reg_t hwacha_NAME(processor_t* p, hwacha_insn_t insn, reg_t pc)
 {
   int xlen = 64;
   reg_t npc = sext_xlen(pc + insn_length(OPCODE));

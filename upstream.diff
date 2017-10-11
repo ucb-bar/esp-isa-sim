@@ -1,0 +1,299 @@
+diff --git a/config.h.in b/config.h.in
+index 137f195..cb68bcb 100644
+--- a/config.h.in
++++ b/config.h.in
+@@ -45,6 +45,9 @@
+ /* Define to 1 if you have the <unistd.h> header file. */
+ #undef HAVE_UNISTD_H
+ 
++/* Define if subproject MCPPBS_SPROJ_NORM is enabled */
++#undef HWACHA_ENABLED
++
+ /* Define to the address where bug reports for this package should be sent. */
+ #undef PACKAGE_BUGREPORT
+ 
+@@ -72,6 +75,9 @@
+ /* Enable hardware management of PTE accessed and dirty bits */
+ #undef RISCV_ENABLE_DIRTY
+ 
++/* Enable Hwacha commit log generation */
++#undef RISCV_ENABLE_HCOMMITLOG
++
+ /* Enable PC histogram generation */
+ #undef RISCV_ENABLE_HISTOGRAM
+ 
+diff --git a/configure b/configure
+index 015f63e..bdb6112 100755
+--- a/configure
++++ b/configure
+@@ -707,6 +707,7 @@ enable_commitlog
+ enable_histogram
+ enable_dirty
+ enable_misaligned
++enable_hcommitlog
+ '
+       ac_precious_vars='build_alias
+ host_alias
+@@ -1355,6 +1356,7 @@ Optional Features:
+                           bits
+   --enable-misaligned     Enable hardware support for misaligned loads and
+                           stores
++  --enable-hcommitlog     Enable Hwacha commit log generation
+ 
+ Optional Packages:
+   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
+@@ -4728,6 +4730,64 @@ fi
+ 
+     # Add subproject to our running list
+ 
++    subprojects="$subprojects hwacha"
++
++    # Process the subproject appropriately. If enabled add it to the
++    # $enabled_subprojects running shell variable, set a
++    # SUBPROJECT_ENABLED C define, and include the appropriate
++    # 'subproject.ac'.
++
++
++      { $as_echo "$as_me:${as_lineno-$LINENO}: configuring default subproject : hwacha" >&5
++$as_echo "$as_me: configuring default subproject : hwacha" >&6;}
++      ac_config_files="$ac_config_files hwacha.mk:hwacha/hwacha.mk.in"
++
++      enable_hwacha_sproj="yes"
++      subprojects_enabled="$subprojects_enabled hwacha"
++
++$as_echo "#define HWACHA_ENABLED /**/" >>confdefs.h
++
++      # Check whether --enable-hcommitlog was given.
++if test "${enable_hcommitlog+set}" = set; then :
++  enableval=$enable_hcommitlog;
++fi
++
++if test "x$enable_hcommitlog" = "xyes"; then :
++
++
++$as_echo "#define RISCV_ENABLE_HCOMMITLOG /**/" >>confdefs.h
++
++
++fi
++
++
++
++
++
++
++    # Determine if this is a required or an optional subproject
++
++
++
++    # Determine if there is a group with the same name
++
++
++
++    # Create variations of the subproject name suitable for use as a CPP
++    # enabled define, a shell enabled variable, and a shell function
++
++
++
++
++
++
++
++
++
++
++
++    # Add subproject to our running list
++
+     subprojects="$subprojects dummy_rocc"
+ 
+     # Process the subproject appropriately. If enabled add it to the
+@@ -4872,6 +4932,8 @@ ac_config_files="$ac_config_files riscv-riscv.pc"
+ 
+ ac_config_files="$ac_config_files riscv-softfloat.pc"
+ 
++ac_config_files="$ac_config_files riscv-hwacha.pc"
++
+ ac_config_files="$ac_config_files riscv-dummy_rocc.pc"
+ 
+ ac_config_files="$ac_config_files riscv-spike_main.pc"
+@@ -5568,6 +5630,7 @@ for ac_config_target in $ac_config_targets
+ do
+   case $ac_config_target in
+     "riscv.mk") CONFIG_FILES="$CONFIG_FILES riscv.mk:riscv/riscv.mk.in" ;;
++    "hwacha.mk") CONFIG_FILES="$CONFIG_FILES hwacha.mk:hwacha/hwacha.mk.in" ;;
+     "dummy_rocc.mk") CONFIG_FILES="$CONFIG_FILES dummy_rocc.mk:dummy_rocc/dummy_rocc.mk.in" ;;
+     "softfloat.mk") CONFIG_FILES="$CONFIG_FILES softfloat.mk:softfloat/softfloat.mk.in" ;;
+     "spike_main.mk") CONFIG_FILES="$CONFIG_FILES spike_main.mk:spike_main/spike_main.mk.in" ;;
+@@ -5576,6 +5639,7 @@ do
+     "riscv-spike.pc") CONFIG_FILES="$CONFIG_FILES riscv-spike.pc" ;;
+     "riscv-riscv.pc") CONFIG_FILES="$CONFIG_FILES riscv-riscv.pc" ;;
+     "riscv-softfloat.pc") CONFIG_FILES="$CONFIG_FILES riscv-softfloat.pc" ;;
++    "riscv-hwacha.pc") CONFIG_FILES="$CONFIG_FILES riscv-hwacha.pc" ;;
+     "riscv-dummy_rocc.pc") CONFIG_FILES="$CONFIG_FILES riscv-dummy_rocc.pc" ;;
+     "riscv-spike_main.pc") CONFIG_FILES="$CONFIG_FILES riscv-spike_main.pc" ;;
+ 
+diff --git a/configure.ac b/configure.ac
+index e361877..520d00a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -86,7 +86,7 @@ AC_SUBST([CXXFLAGS],["-Wall -Wno-unused -g -O2 -std=c++11"])
+ # The '*' suffix indicates an optional subproject. The '**' suffix
+ # indicates an optional subproject which is also the name of a group.
+ 
+-MCPPBS_SUBPROJECTS([ riscv, dummy_rocc, softfloat, spike_main ])
++MCPPBS_SUBPROJECTS([ riscv, hwacha, dummy_rocc, softfloat, spike_main ])
+ 
+ #-------------------------------------------------------------------------
+ # MCPPBS subproject groups
+@@ -108,6 +108,7 @@ AC_CONFIG_FILES([Makefile])
+ AC_CONFIG_FILES([riscv-spike.pc])
+ AC_CONFIG_FILES([riscv-riscv.pc])
+ AC_CONFIG_FILES([riscv-softfloat.pc])
++AC_CONFIG_FILES([riscv-hwacha.pc])
+ AC_CONFIG_FILES([riscv-dummy_rocc.pc])
+ AC_CONFIG_FILES([riscv-spike_main.pc])
+ AC_OUTPUT
+diff --git a/riscv-hwacha.pc.in b/riscv-hwacha.pc.in
+new file mode 100644
+index 0000000..cad4e29
+--- /dev/null
++++ b/riscv-hwacha.pc.in
+@@ -0,0 +1,11 @@
++prefix=@prefix@
++exec_prefix=@prefix@
++libdir=${prefix}/@libdir@
++includedir=${prefix}/@includedir@
++
++Name: riscv-hwacha
++Description: RISC-V Hwacha binary library
++Version: git
++Libs: -Wl,-rpath,${libdir} -L${libdir} -lhwacha
++Cflags: -I${includedir}
++URL: http://riscv.org/download.html#tab_spike
+diff --git a/riscv/disasm.h b/riscv/disasm.h
+index e2981d4..e0fd61f 100644
+--- a/riscv/disasm.h
++++ b/riscv/disasm.h
+@@ -21,7 +21,7 @@ class arg_t
+ class disasm_insn_t
+ {
+  public:
+-  disasm_insn_t(const char* name, uint32_t match, uint32_t mask,
++  disasm_insn_t(const char* name, uint64_t match, uint64_t mask,
+                 const std::vector<const arg_t*>& args)
+     : match(match), mask(mask), args(args), name(name) {}
+ 
+@@ -47,12 +47,12 @@ class disasm_insn_t
+     return s.str();
+   }
+ 
+-  uint32_t get_match() const { return match; }
+-  uint32_t get_mask() const { return mask; }
++  uint64_t get_match() const { return match; }
++  uint64_t get_mask() const { return mask; }
+ 
+  private:
+-  uint32_t match;
+-  uint32_t mask;
++  uint64_t match;
++  uint64_t mask;
+   std::vector<const arg_t*> args;
+   const char* name;
+ };
+@@ -63,7 +63,7 @@ class disassembler_t
+   disassembler_t(int xlen);
+   ~disassembler_t();
+   std::string disassemble(insn_t insn) const;
+-  void add_insn(disasm_insn_t* insn);
++  void add_insn(disasm_insn_t* insn, bool priority = false);
+  private:
+   static const int HASH_SIZE = 256;
+   std::vector<const disasm_insn_t*> chain[HASH_SIZE+1];
+diff --git a/riscv/extension.h b/riscv/extension.h
+index d1e847d..366501d 100644
+--- a/riscv/extension.h
++++ b/riscv/extension.h
+@@ -18,7 +18,7 @@ class extension_t
+   virtual void set_debug(bool value) {};
+   virtual ~extension_t();
+ 
+-  void set_processor(processor_t* _p) { p = _p; }
++  virtual void set_processor(processor_t* _p) { p = _p; }
+  protected:
+   processor_t* p;
+ 
+diff --git a/riscv/insns/ecall.h b/riscv/insns/ecall.h
+index e298ac7..a933e4d 100644
+--- a/riscv/insns/ecall.h
++++ b/riscv/insns/ecall.h
+@@ -2,6 +2,6 @@ switch (STATE.prv)
+ {
+   case PRV_U: throw trap_user_ecall();
+   case PRV_S: throw trap_supervisor_ecall();
++  case PRV_H: throw trap_hypervisor_ecall();
+   case PRV_M: throw trap_machine_ecall();
+-  default: abort();
+ }
+diff --git a/riscv/processor.cc b/riscv/processor.cc
+index 1e3573d..86cb41b 100644
+--- a/riscv/processor.cc
++++ b/riscv/processor.cc
+@@ -694,7 +694,7 @@ void processor_t::register_extension(extension_t* x)
+     register_insn(insn);
+   build_opcode_map();
+   for (auto disasm_insn : x->get_disasms())
+-    disassembler->add_insn(disasm_insn);
++    disassembler->add_insn(disasm_insn, true);
+   if (ext != NULL)
+     throw std::logic_error("only one extension may be registered");
+   ext = x;
+diff --git a/riscv/processor.h b/riscv/processor.h
+index 071f458..e178955 100644
+--- a/riscv/processor.h
++++ b/riscv/processor.h
+@@ -171,6 +171,7 @@ public:
+   reg_t get_csr(int which);
+   mmu_t* get_mmu() { return mmu; }
+   state_t* get_state() { return &state; }
++  unsigned get_max_xlen() { return max_xlen; }
+   extension_t* get_extension() { return ext; }
+   bool supports_extension(unsigned char ext) {
+     if (ext >= 'a' && ext <= 'z') ext += 'A' - 'a';
+diff --git a/spike_main/disasm.cc b/spike_main/disasm.cc
+index 56c6fe6..a610e71 100644
+--- a/spike_main/disasm.cc
++++ b/spike_main/disasm.cc
+@@ -562,12 +562,15 @@ const disasm_insn_t* disassembler_t::lookup(insn_t insn) const
+   return NULL;
+ }
+ 
+-void disassembler_t::add_insn(disasm_insn_t* insn)
++void disassembler_t::add_insn(disasm_insn_t* insn, bool priority)
+ {
+   size_t idx = HASH_SIZE;
+   if (insn->get_mask() % HASH_SIZE == HASH_SIZE - 1)
+     idx = insn->get_match() % HASH_SIZE;
+-  chain[idx].push_back(insn);
++  if(priority)
++    chain[idx].insert(chain[idx].begin(), insn);
++  else
++    chain[idx].push_back(insn);
+ }
+ 
+ disassembler_t::~disassembler_t()
+diff --git a/spike_main/spike.cc b/spike_main/spike.cc
+index 23f8e49..20e3a1c 100644
+--- a/spike_main/spike.cc
++++ b/spike_main/spike.cc
+@@ -138,7 +138,10 @@ int main(int argc, char** argv)
+   {
+     if (ic) s.get_core(i)->get_mmu()->register_memtracer(&*ic);
+     if (dc) s.get_core(i)->get_mmu()->register_memtracer(&*dc);
+-    if (extension) s.get_core(i)->register_extension(extension());
++    if (extension) {
++      s.get_core(i)->register_extension(extension());
++      s.get_core(i)->reset();
++    }
+   }
+ 
+   s.set_debug(debug);

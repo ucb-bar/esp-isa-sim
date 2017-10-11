@@ -140,97 +140,97 @@ struct : public arg_t {
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vspr[insn.svsrd()];
+    return vspr[((hwacha_insn_t)insn).svsrd()];
   }
 } svsrd;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vapr[insn.svard()];
+    return vapr[((hwacha_insn_t)insn).svard()];
   }
 } svard;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vvpr[insn.vrd()];
+    return vvpr[((hwacha_insn_t)insn).vrd()];
   }
 } vvrd;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vvpr[insn.vrs1()];
+    return vvpr[((hwacha_insn_t)insn).vrs1()];
   }
 } vvrs1;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vvpr[insn.vrs2()];
+    return vvpr[((hwacha_insn_t)insn).vrs2()];
   }
 } vvrs2;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vspr[insn.vrd()];
+    return vspr[((hwacha_insn_t)insn).vrd()];
   }
 } vsrd;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vspr[insn.vrs1()];
+    return vspr[((hwacha_insn_t)insn).vrs1()];
   }
 } vsrs1;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vspr[insn.vrs2()];
+    return vspr[((hwacha_insn_t)insn).vrs2()];
   }
 } vsrs2;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return insn.vd() ? vvpr[insn.vrd()] : vspr[insn.vrd()];
+    return ((hwacha_insn_t)insn).vd() ? vvpr[((hwacha_insn_t)insn).vrd()] : vspr[((hwacha_insn_t)insn).vrd()];
   }
 } vdrd;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return insn.vs1() ? vvpr[insn.vrs1()] : vspr[insn.vrs1()];
+    return ((hwacha_insn_t)insn).vs1() ? vvpr[((hwacha_insn_t)insn).vrs1()] : vspr[((hwacha_insn_t)insn).vrs1()];
   }
 } vdrs1;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return insn.vs2() ? vvpr[insn.vrs2()] : vspr[insn.vrs2()];
+    return ((hwacha_insn_t)insn).vs2() ? vvpr[((hwacha_insn_t)insn).vrs2()] : vspr[((hwacha_insn_t)insn).vrs2()];
   }
 } vdrs2;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return insn.vs3() ? vvpr[insn.vrs3()] : vspr[insn.vrs3()];
+    return ((hwacha_insn_t)insn).vs3() ? vvpr[((hwacha_insn_t)insn).vrs3()] : vspr[((hwacha_insn_t)insn).vrs3()];
   }
 } vdrs3;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vppr[insn.vrd()];
+    return vppr[((hwacha_insn_t)insn).vrd()];
   }
 } vprd;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vppr[insn.vrs1()];
+    return vppr[((hwacha_insn_t)insn).vrs1()];
   }
 } vprs1;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vppr[insn.vrs2()];
+    return vppr[((hwacha_insn_t)insn).vrs2()];
   }
 } vprs2;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return vppr[insn.vrs3()];
+    return vppr[((hwacha_insn_t)insn).vrs3()];
   }
 } vprs3;
 
@@ -254,15 +254,16 @@ struct : public arg_t {
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return std::string("0(") + vvpr[insn.vrs1()] + ')';
+    return std::string("0(") + vvpr[((hwacha_insn_t)insn).vrs1()] + ')';
   }
 } vamo_address;
 
 struct : public arg_t {
   std::string to_string(insn_t insn) const {
-    return std::to_string((int)insn.v_imm());
+    return std::to_string((int)((hwacha_insn_t)insn).v_imm());
   }
 } vimm;
+
 
 std::vector<disasm_insn_t*> hwacha_t::get_disasms()
 {
@@ -300,7 +301,7 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
 
   #define DISASM_UT_INSN(name, code, extra, ...) \
     insns.push_back(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__)); \
-    ut_disassembler->add_insn(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__));
+    ut_disassembler->add_insn(new hwacha_disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__));
 
   #define DEFINE_RTYPE(code) DISASM_UT_INSN(#code, code, 0, {&vdrd, &vdrs1, &vdrs2})
   #define DEFINE_R1TYPE(code) DISASM_UT_INSN(#code, code, 0, {&vdrd, &vdrs1})

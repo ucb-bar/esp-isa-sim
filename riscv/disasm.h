@@ -50,7 +50,7 @@ class disasm_insn_t
   uint64_t get_match() const { return match; }
   uint64_t get_mask() const { return mask; }
 
- private:
+ protected:
   uint64_t match;
   uint64_t mask;
   std::vector<const arg_t*> args;
