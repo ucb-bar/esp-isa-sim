@@ -144,12 +144,31 @@ public:
         return lhs; \
       } catch (trap_load_page_fault& t) { \
         /* AMO faults should be reported as store faults */ \
-        throw trap_store_page_fault(t.get_badaddr()); \
+        throw trap_store_page_fault(t.get_tval()); \
       } catch (trap_load_access_fault& t) { \
         /* AMO faults should be reported as store faults */ \
-        throw trap_store_access_fault(t.get_badaddr()); \
+        throw trap_store_access_fault(t.get_tval()); \
       } \
     }
+
+  void store_float128(reg_t addr, float128_t val)
+  {
+#ifndef RISCV_ENABLE_MISALIGNED
+    if (unlikely(addr & (sizeof(float128_t)-1)))
+      throw trap_store_address_misaligned(addr);
+#endif
+    store_uint64(addr, val.v[0]);
+    store_uint64(addr + 8, val.v[1]);
+  }
+
+  float128_t load_float128(reg_t addr)
+  {
+#ifndef RISCV_ENABLE_MISALIGNED
+    if (unlikely(addr & (sizeof(float128_t)-1)))
+      throw trap_load_address_misaligned(addr);
+#endif
+    return (float128_t){load_uint64(addr), load_uint64(addr + 8)};
+  }
 
   // store value to memory at aligned address
   store_func(uint8)
@@ -301,23 +320,23 @@ struct vm_info {
   reg_t ptbase;
 };
 
-inline vm_info decode_vm_info(int xlen, reg_t prv, reg_t sptbr)
+inline vm_info decode_vm_info(int xlen, reg_t prv, reg_t satp)
 {
   if (prv == PRV_M) {
     return {0, 0, 0, 0};
   } else if (prv <= PRV_S && xlen == 32) {
-    switch (get_field(sptbr, SPTBR32_MODE)) {
-      case SPTBR_MODE_OFF: return {0, 0, 0, 0};
-      case SPTBR_MODE_SV32: return {2, 10, 4, (sptbr & SPTBR32_PPN) << PGSHIFT};
+    switch (get_field(satp, SATP32_MODE)) {
+      case SATP_MODE_OFF: return {0, 0, 0, 0};
+      case SATP_MODE_SV32: return {2, 10, 4, (satp & SATP32_PPN) << PGSHIFT};
       default: abort();
     }
   } else if (prv <= PRV_S && xlen == 64) {
-    switch (get_field(sptbr, SPTBR64_MODE)) {
-      case SPTBR_MODE_OFF: return {0, 0, 0, 0};
-      case SPTBR_MODE_SV39: return {3, 9, 8, (sptbr & SPTBR64_PPN) << PGSHIFT};
-      case SPTBR_MODE_SV48: return {4, 9, 8, (sptbr & SPTBR64_PPN) << PGSHIFT};
-      case SPTBR_MODE_SV57: return {5, 9, 8, (sptbr & SPTBR64_PPN) << PGSHIFT};
-      case SPTBR_MODE_SV64: return {6, 9, 8, (sptbr & SPTBR64_PPN) << PGSHIFT};
+    switch (get_field(satp, SATP64_MODE)) {
+      case SATP_MODE_OFF: return {0, 0, 0, 0};
+      case SATP_MODE_SV39: return {3, 9, 8, (satp & SATP64_PPN) << PGSHIFT};
+      case SATP_MODE_SV48: return {4, 9, 8, (satp & SATP64_PPN) << PGSHIFT};
+      case SATP_MODE_SV57: return {5, 9, 8, (satp & SATP64_PPN) << PGSHIFT};
+      case SATP_MODE_SV64: return {6, 9, 8, (satp & SATP64_PPN) << PGSHIFT};
       default: abort();
     }
   } else {

@@ -25,16 +25,18 @@ static void help()
   fprintf(stderr, "  -g                    Track histogram of PCs\n");
   fprintf(stderr, "  -l                    Generate a log of execution\n");
   fprintf(stderr, "  -h                    Print this help message\n");
-  fprintf(stderr, "  -H                 Start halted, allowing a debugger to connect\n");
+  fprintf(stderr, "  -H                    Start halted, allowing a debugger to connect\n");
   fprintf(stderr, "  --isa=<name>          RISC-V ISA string [default %s]\n", DEFAULT_ISA);
   fprintf(stderr, "  --pc=<address>        Override ELF entry point\n");
+  fprintf(stderr, "  --hartids=<a,b,...>   Explicitly specify hartids, default is 0,1,...\n");
   fprintf(stderr, "  --ic=<S>:<W>:<B>      Instantiate a cache model with S sets,\n");
   fprintf(stderr, "  --dc=<S>:<W>:<B>        W ways, and B-byte blocks (with S and\n");
   fprintf(stderr, "  --l2=<S>:<W>:<B>        B both powers of 2).\n");
   fprintf(stderr, "  --extension=<name>    Specify RoCC Extension\n");
   fprintf(stderr, "  --extlib=<name>       Shared library to load\n");
   fprintf(stderr, "  --rbb-port=<port>     Listen on <port> for remote bitbang connection\n");
-  fprintf(stderr, "  --dump-dts  Print device tree string and exit\n");
+  fprintf(stderr, "  --dump-dts            Print device tree string and exit\n");
+  fprintf(stderr, "  --progsize=<words>    progsize for the debug module [default 2]\n");
   exit(1);
 }
 
@@ -84,6 +86,20 @@ int main(int argc, char** argv)
   const char* isa = DEFAULT_ISA;
   uint16_t rbb_port = 0;
   bool use_rbb = false;
+  unsigned progsize = 2;
+  std::vector<int> hartids;
+
+  auto const hartids_parser = [&](const char *s) {
+    std::string const str(s);
+    std::stringstream stream(str);
+
+    int n;
+    while (stream >> n)
+    {
+      hartids.push_back(n);
+      if (stream.peek() == ',') stream.ignore();
+    }
+  };
 
   option_parser_t parser;
   parser.help(&help);
@@ -97,6 +113,7 @@ int main(int argc, char** argv)
   parser.option('H', 0, 0, [&](const char* s){halted = true;});
   parser.option(0, "rbb-port", 1, [&](const char* s){use_rbb = true; rbb_port = atoi(s);});
   parser.option(0, "pc", 1, [&](const char* s){start_pc = strtoull(s, 0, 0);});
+  parser.option(0, "hartids", 1, hartids_parser);
   parser.option(0, "ic", 1, [&](const char* s){ic.reset(new icache_sim_t(s));});
   parser.option(0, "dc", 1, [&](const char* s){dc.reset(new dcache_sim_t(s));});
   parser.option(0, "l2", 1, [&](const char* s){l2.reset(cache_sim_t::construct(s, "L2$"));});
@@ -110,13 +127,15 @@ int main(int argc, char** argv)
       exit(-1);
     }
   });
+  parser.option(0, "progsize", 1, [&](const char* s){progsize = atoi(s);});
 
   auto argv1 = parser.parse(argv);
   std::vector<std::string> htif_args(argv1, (const char*const*)argv + argc);
   if (mems.empty())
     mems = make_mems("2048");
 
-  sim_t s(isa, nprocs, halted, start_pc, mems, htif_args);
+  sim_t s(isa, nprocs, halted, start_pc, mems, htif_args, std::move(hartids),
+      progsize);
   std::unique_ptr<remote_bitbang_t> remote_bitbang((remote_bitbang_t *) NULL);
   std::unique_ptr<jtag_dtm_t> jtag_dtm(new jtag_dtm_t(&s.debug_module));
   if (use_rbb) {

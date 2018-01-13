@@ -29,7 +29,7 @@ struct insn_desc_t
 struct commit_log_reg_t
 {
   reg_t addr;
-  reg_t data;
+  freg_t data;
 };
 
 typedef struct
@@ -97,7 +97,7 @@ struct state_t
   reg_t prv;    // TODO: Can this be an enum instead?
   reg_t mstatus;
   reg_t mepc;
-  reg_t mbadaddr;
+  reg_t mtval;
   reg_t mscratch;
   reg_t mtvec;
   reg_t mcause;
@@ -109,10 +109,10 @@ struct state_t
   uint32_t mcounteren;
   uint32_t scounteren;
   reg_t sepc;
-  reg_t sbadaddr;
+  reg_t stval;
   reg_t sscratch;
   reg_t stvec;
-  reg_t sptbr;
+  reg_t satp;
   reg_t scause;
   reg_t dpc;
   reg_t dscratch;
@@ -138,6 +138,8 @@ struct state_t
 #ifdef RISCV_ENABLE_COMMITLOG
   commit_log_reg_t log_reg_write;
   reg_t last_inst_priv;
+  int last_inst_xlen;
+  int last_inst_flen;
 #endif
 };
 
@@ -172,11 +174,18 @@ public:
   mmu_t* get_mmu() { return mmu; }
   state_t* get_state() { return &state; }
   unsigned get_max_xlen() { return max_xlen; }
+  unsigned get_xlen() { return xlen; }
+  unsigned get_flen() {
+    return supports_extension('Q') ? 128 :
+           supports_extension('D') ? 64 :
+           supports_extension('F') ? 32 : 0;
+  }
   extension_t* get_extension() { return ext; }
   bool supports_extension(unsigned char ext) {
     if (ext >= 'a' && ext <= 'z') ext += 'A' - 'a';
     return ext >= 'A' && ext <= 'Z' && ((isa >> (ext - 'A')) & 1);
   }
+  reg_t legalize_privilege(reg_t);
   void set_privilege(reg_t);
   void yield_load_reservation() { state.load_reservation = (reg_t)-1; }
   void update_histogram(reg_t pc);
@@ -195,12 +204,6 @@ public:
   bool slow_path();
   bool halted() { return state.dcsr.cause ? true : false; }
   bool halt_request;
-  // The unique debug rom address that this hart jumps to when entering debug
-  // mode. Rely on the fact that spike hart IDs start at 0 and are consecutive.
-  uint32_t debug_rom_entry() {
-    fprintf(stderr, "Debug_rom_entry called for id %d = %x\n", id, DEBUG_ROM_ENTRY + 4*id);
-    return DEBUG_ROM_ENTRY + 4 * id;
-  }
 
   // Return the index of a trigger that matched, or -1.
   inline int trigger_match(trigger_operation_t operation, reg_t address, reg_t data)
@@ -220,7 +223,6 @@ public:
           (operation == OPERATION_STORE && !state.mcontrol[i].store) ||
           (operation == OPERATION_LOAD && !state.mcontrol[i].load) ||
           (state.prv == PRV_M && !state.mcontrol[i].m) ||
-          (state.prv == PRV_H && !state.mcontrol[i].h) ||
           (state.prv == PRV_S && !state.mcontrol[i].s) ||
           (state.prv == PRV_U && !state.mcontrol[i].u)) {
         continue;
@@ -323,6 +325,9 @@ private:
   void build_opcode_map();
   void register_base_instructions();
   insn_func_t decode_insn(insn_t insn);
+
+  // Track repeated executions for processor_t::disasm()
+  uint64_t last_pc, last_bits, executions;
 };
 
 reg_t illegal_instruction(processor_t* p, insn_t insn, reg_t pc);

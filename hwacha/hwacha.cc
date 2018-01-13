@@ -89,28 +89,28 @@ static reg_t custom(processor_t* p, insn_t insn, reg_t pc)
 #ifdef RISCV_ENABLE_HCOMMITLOG
     fprintf(stderr,"H: LOAD MISALIGNED\n");
 #endif
-    h->take_exception(HWACHA_CAUSE_MISALIGNED_LOAD, t.get_badaddr());
+    h->take_exception(HWACHA_CAUSE_MISALIGNED_LOAD, t.get_tval());
   }
   catch (trap_store_address_misaligned& t)
   {
 #ifdef RISCV_ENABLE_HCOMMITLOG
     fprintf(stderr,"H: STORE MISALIGNED\n");
 #endif
-    h->take_exception(HWACHA_CAUSE_MISALIGNED_STORE, t.get_badaddr());
+    h->take_exception(HWACHA_CAUSE_MISALIGNED_STORE, t.get_tval());
   }
   catch (trap_load_access_fault& t)
   {
 #ifdef RISCV_ENABLE_HCOMMITLOG
     fprintf(stderr,"H: LOAD ACCESS FAULT\n");
 #endif
-    h->take_exception(HWACHA_CAUSE_FAULT_LOAD, t.get_badaddr());
+    h->take_exception(HWACHA_CAUSE_FAULT_LOAD, t.get_tval());
   }
   catch (trap_store_access_fault& t)
   {
 #ifdef RISCV_ENABLE_HCOMMITLOG
     fprintf(stderr,"H: STORE ACCESS FAULT\n");
 #endif
-    h->take_exception(HWACHA_CAUSE_FAULT_STORE, t.get_badaddr());
+    h->take_exception(HWACHA_CAUSE_FAULT_STORE, t.get_tval());
   }
 
   if (!matched) {
