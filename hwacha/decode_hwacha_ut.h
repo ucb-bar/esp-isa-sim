@@ -95,8 +95,21 @@ static inline void write_rd(hwacha_t* h, insn_t insn, uint32_t idx, reg_t value)
 #define FRS1 RS1
 #define FRS2 RS2
 #define FRS3 RS3
-#define WRITE_FRD(value) WRITE_RD(*freg(value).v)
+#define WRITE_FRD(value) WRITE_RD(*fregs(value).v)
 
+static inline freg_t fregs(float32_t f)
+{
+	int32_t v = f.v;
+	return { (uint64_t)v, (uint64_t)(-(v < 0)) };
+}
+static inline freg_t fregs(float64_t f)
+{
+	return { f.v, (uint64_t)(-((int64_t)f.v < 0)) };
+}
+static inline freg_t fregs(float128_t f)
+{
+	return f;
+}
 
 // we assume the vector unit has floating-point alus
 #undef require_fp
