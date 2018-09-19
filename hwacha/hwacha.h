@@ -7,7 +7,7 @@
 
 static const uint32_t MAX_XPR = 256;
 static const uint32_t MAX_PPR = 16;
-static const uint32_t MAX_SPR = 256;
+static const uint32_t MAX_SPR = 64;
 static const uint32_t MAX_APR = 32;
 
 static std::random_device rd;

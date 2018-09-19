@@ -49,19 +49,20 @@
 
 static inline reg_t read_spr(hwacha_t* h, insn_t insn, size_t src)
 {
-  if (src >= 256)
+  if (src >= MAX_SPR)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
   return (h->get_ct_state()->SPR[src]);
 }
 
 static inline void write_spr(hwacha_t* h, insn_t insn, size_t dst, reg_t value)
 {
-  if (dst >= 256)
+  if (dst >= MAX_SPR)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
 #ifdef RISCV_ENABLE_HCOMMITLOG
   printf("H: write_srf %ld %016lx\n", dst, value);
 #endif
-  h->get_ct_state()->SPR.write(dst, value);
+  if (dst != 0)
+    h->get_ct_state()->SPR.write(dst, value);
 }
 
 #define READ_SPR(src) read_spr(h, insn, src)
