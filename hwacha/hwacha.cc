@@ -38,11 +38,10 @@ void ut_state_t::reset()
   for (size_t i = 0; i < MAX_XPR; i++) {
     XPR.write(i, reg_dis(gen));
   }
-  for (size_t i = 1; i < MAX_PPR; i++) {
+  for (size_t i = 0; i < MAX_PPR; i++) {
     PPR.write(i, bool_dis(gen));
   }
   run = false;
-  PPR.write(0,1);
 }
 
 void hwacha_t::reset()
