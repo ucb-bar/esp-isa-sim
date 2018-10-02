@@ -5,15 +5,16 @@
 #include "decode.h"
 #include "config.h"
 #include "devices.h"
+#include "trap.h"
 #include <string>
 #include <vector>
 #include <map>
-#include "debug_rom/debug_rom_defines.h"
+#include "debug_rom_defines.h"
 
 class processor_t;
 class mmu_t;
 typedef reg_t (*insn_func_t)(processor_t*, insn_t, reg_t);
-class sim_t;
+class simif_t;
 class trap_t;
 class extension_t;
 class disassembler_t;
@@ -85,7 +86,7 @@ typedef struct
 // architectural state of a RISC-V hart
 struct state_t
 {
-  void reset();
+  void reset(reg_t max_isa);
 
   static const int num_triggers = 4;
 
@@ -95,6 +96,7 @@ struct state_t
 
   // control and status registers
   reg_t prv;    // TODO: Can this be an enum instead?
+  reg_t misa;
   reg_t mstatus;
   reg_t mepc;
   reg_t mtval;
@@ -133,8 +135,6 @@ struct state_t
       STEP_STEPPED
   } single_step;
 
-  reg_t load_reservation;
-
 #ifdef RISCV_ENABLE_COMMITLOG
   commit_log_reg_t log_reg_write;
   reg_t last_inst_priv;
@@ -162,7 +162,7 @@ static int cto(reg_t val)
 class processor_t : public abstract_device_t
 {
 public:
-  processor_t(const char* isa, sim_t* sim, uint32_t id, bool halt_on_reset=false);
+  processor_t(const char* isa, simif_t* sim, uint32_t id, bool halt_on_reset=false);
   ~processor_t();
 
   void set_debug(bool value);
@@ -173,8 +173,9 @@ public:
   reg_t get_csr(int which);
   mmu_t* get_mmu() { return mmu; }
   state_t* get_state() { return &state; }
-  unsigned get_max_xlen() { return max_xlen; }
   unsigned get_xlen() { return xlen; }
+  unsigned get_max_xlen() { return max_xlen; }
+  std::string get_isa_string() { return isa_string; }
   unsigned get_flen() {
     return supports_extension('Q') ? 128 :
            supports_extension('D') ? 64 :
@@ -183,11 +184,17 @@ public:
   extension_t* get_extension() { return ext; }
   bool supports_extension(unsigned char ext) {
     if (ext >= 'a' && ext <= 'z') ext += 'A' - 'a';
-    return ext >= 'A' && ext <= 'Z' && ((isa >> (ext - 'A')) & 1);
+    return ext >= 'A' && ext <= 'Z' && ((state.misa >> (ext - 'A')) & 1);
+  }
+  reg_t pc_alignment_mask() {
+    return ~(reg_t)(supports_extension('C') ? 0 : 2);
+  }
+  void check_pc_alignment(reg_t pc) {
+    if (unlikely(pc & ~pc_alignment_mask()))
+      throw trap_instruction_address_misaligned(pc);
   }
   reg_t legalize_privilege(reg_t);
   void set_privilege(reg_t);
-  void yield_load_reservation() { state.load_reservation = (reg_t)-1; }
   void update_histogram(reg_t pc);
   const disassembler_t* get_disassembler() { return disassembler; }
 
@@ -288,7 +295,7 @@ public:
   void trigger_updated();
 
 private:
-  sim_t* sim;
+  simif_t* sim;
   mmu_t* mmu; // main memory is always accessed via the mmu
   extension_t* ext;
   disassembler_t* disassembler;
@@ -296,7 +303,6 @@ private:
   uint32_t id;
   unsigned max_xlen;
   unsigned xlen;
-  reg_t isa;
   reg_t max_isa;
   std::string isa_string;
   bool histogram_enabled;
@@ -316,7 +322,6 @@ private:
 
   void enter_debug_mode(uint8_t cause);
 
-  friend class sim_t;
   friend class mmu_t;
   friend class clint_t;
   friend class extension_t;

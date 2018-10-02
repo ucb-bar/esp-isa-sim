@@ -71,6 +71,7 @@ public:
   insn_bits_t bits() { return b; }
   int length() { return insn_length(b); }
   int64_t i_imm() { return int64_t(b) >> 20; }
+  int64_t shamt() { return x(20, 6); }
   int64_t s_imm() { return x(7, 5) + (xs(25, 7) << 5); }
 
   int64_t sb_imm() { return (x(8, 4) << 1) + (x(25,6) << 5) + (x(7,1) << 11) + (imm_sign() << 12); }
@@ -244,21 +245,27 @@ private:
 #define zext_xlen(x) (((reg_t)(x) << (64-xlen)) >> (64-xlen))
 
 #define set_pc(x) \
-  do { if (unlikely(((x) & 2)) && !p->supports_extension('C')) \
-         throw trap_instruction_address_misaligned(x); \
+  do { p->check_pc_alignment(x); \
        npc = sext_xlen(x); \
      } while(0)
 
 #define set_pc_and_serialize(x) \
-  do { reg_t __npc = (x); \
-       set_pc(__npc); /* check alignment */ \
+  do { reg_t __npc = (x) & p->pc_alignment_mask(); \
        npc = PC_SERIALIZE_AFTER; \
        STATE.pc = __npc; \
      } while(0)
 
+#define wfi() \
+  do { set_pc_and_serialize(npc); \
+       npc = PC_SERIALIZE_WFI; \
+     } while(0)
+
+#define serialize() set_pc_and_serialize(npc)
+
 /* Sentinel PC values to serialize simulator pipeline */
 #define PC_SERIALIZE_BEFORE 3
 #define PC_SERIALIZE_AFTER 5
+#define PC_SERIALIZE_WFI 7
 #define invalid_pc(pc) ((pc) & 1)
 
 /* Convenience wrappers to simplify softfloat code sequences */

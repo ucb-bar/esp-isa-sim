@@ -11,9 +11,11 @@ riscv_hdrs = \
 	decode.h \
 	devices.h \
 	disasm.h \
+	dts.h \
 	mmu.h \
 	processor.h \
 	sim.h \
+	simif.h \
 	trap.h \
 	encoding.h \
 	cachesim.h \
@@ -24,6 +26,7 @@ riscv_hdrs = \
 	insn_template.h \
 	mulhi.h \
 	debug_module.h \
+	debug_rom_defines.h \
 	remote_bitbang.h \
 	jtag_dtm.h \
 
@@ -33,6 +36,7 @@ riscv_precompiled_hdrs = \
 riscv_srcs = \
 	processor.cc \
 	execute.cc \
+	dts.cc \
 	sim.cc \
 	interactive.cc \
 	trap.cc \
