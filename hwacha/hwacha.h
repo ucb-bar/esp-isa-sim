@@ -26,6 +26,8 @@ struct ct_state_t
   uint32_t vl;
   uint32_t count;
   uint32_t prec;
+  uint32_t vxrm;
+  uint32_t vxsat;
 
   uint32_t fflags;
   uint32_t frm;
