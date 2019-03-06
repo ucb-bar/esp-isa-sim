@@ -20,7 +20,7 @@ struct systolic_state_t
 {
   void reset();
 
-  int32_t SCRATCHPAD[10*ARRAY_X_DIM*ARRAY_Y_DIM];
+  int8_t SCRATCHPAD[10*ARRAY_X_DIM*ARRAY_Y_DIM];
   int32_t PE_array_state[ARRAY_X_DIM][ARRAY_Y_DIM];
 
   uint32_t output_sp_addr;
