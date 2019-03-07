@@ -70,11 +70,14 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2)
     //compute with preload
     else if (insn.funct == 4)
     {
+#ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+      printf("SYSTOLIC: start matmul instruction (with preload) withh A_addr %016lx and B_addr %016lx instruction\n", xs1, xs2);
+#endif 
       for (uint32_t i=0; i<ARRAY_X_DIM; i++) {
         for (uint32_t j=0; j<ARRAY_Y_DIM; j++) {
            systolic_state.PE_array_state[i][j] = systolic_state.SCRATCHPAD[systolic_state.preload_sp_addr + i*ARRAY_X_DIM + j];
 #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-           printf("SYSTOLIC: writing preload value %016x from scratchpad address %016x to PE %d,%d\n", systolic_state.PE_array_state[i][j], systolic_state.output_sp_addr + i*ARRAY_X_DIM + j, i, j);
+           printf("SYSTOLIC: writing preload value %016x from scratchpad address %016x to PE %d,%d\n", systolic_state.PE_array_state[i][j], systolic_state.preload_sp_addr + i*ARRAY_X_DIM + j, i, j);
 #endif 
         }
       }
@@ -82,28 +85,35 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2)
       reg_t b_addr = xs2;
       for (uint32_t i=0; i<ARRAY_X_DIM; i++) {
         for (uint32_t j=0; j<ARRAY_Y_DIM; j++) {
-           systolic_state.PE_array_state[i][j] += systolic_state.SCRATCHPAD[a_addr+i] * systolic_state.SCRATCHPAD[b_addr+j];
-           if (systolic_state.output_sp_addr !=  0xFFFFFFFF)
+          for (uint32_t k=0; k<ARRAY_X_DIM; k++) {
+           systolic_state.PE_array_state[i][j] += systolic_state.SCRATCHPAD[a_addr + i*ARRAY_X_DIM + k] * systolic_state.SCRATCHPAD[b_addr + k*ARRAY_X_DIM + j];
+          }
+          if (systolic_state.output_sp_addr !=  0xFFFFFFFF)
 #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
              printf("SYSTOLIC: writing array state value %016x from PE %d,%d to scratchpad address %016x\n", systolic_state.PE_array_state[i][j], i, j, systolic_state.output_sp_addr + i*ARRAY_X_DIM + j);
 #endif 
-             systolic_state.SCRATCHPAD[systolic_state.output_sp_addr + i*ARRAY_X_DIM + j] = (int8_t) systolic_state.PE_array_state[i][j]; 
+             systolic_state.SCRATCHPAD[systolic_state.output_sp_addr + i*ARRAY_X_DIM + j] = (uint8_t) systolic_state.PE_array_state[i][j]; 
         }
       }
     }
     //compute with acculmulation of previous value. A and B are row major
     else if (insn.funct == 5)
     {
+#ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+      printf("SYSTOLIC: start matmul instruction (no preload) withh A_addr %016lx and B_addr %016lx instruction\n", xs1, xs2);
+#endif 
       reg_t a_addr = xs1;
       reg_t b_addr = xs2;
       for (uint32_t i=0; i<ARRAY_X_DIM; i++) {
         for (uint32_t j=0; j<ARRAY_Y_DIM; j++) {
-           systolic_state.PE_array_state[i][j] += systolic_state.SCRATCHPAD[a_addr+i] * systolic_state.SCRATCHPAD[b_addr+j];
-           if (systolic_state.output_sp_addr !=  0xFFFFFFFF)
+          for (uint32_t k=0; k<ARRAY_X_DIM; k++) {
+           systolic_state.PE_array_state[i][j] += systolic_state.SCRATCHPAD[a_addr + i*ARRAY_X_DIM + j] * systolic_state.SCRATCHPAD[b_addr + k*ARRAY_X_DIM + j];
+          }
+          if (systolic_state.output_sp_addr !=  0xFFFFFFFF)
 #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
              printf("SYSTOLIC: writing array state value %016x from PE %d,%d to scratchpad address %016x\n", systolic_state.PE_array_state[i][j], i, j, systolic_state.output_sp_addr + i*ARRAY_X_DIM + j);
 #endif 
-             systolic_state.SCRATCHPAD[systolic_state.output_sp_addr + i*ARRAY_X_DIM + j] = (int8_t) systolic_state.PE_array_state[i][j]; 
+             systolic_state.SCRATCHPAD[systolic_state.output_sp_addr + i*ARRAY_X_DIM + j] = (uint8_t) systolic_state.PE_array_state[i][j]; 
         }
       }
     }
