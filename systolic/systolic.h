@@ -9,6 +9,8 @@
 static const uint32_t MAX_SCRATCHPAD_SIZE = 256;
 static const uint32_t ARRAY_X_DIM = 16;
 static const uint32_t ARRAY_Y_DIM = 16;
+static const uint32_t LOG_ARRAY_X_DIM = 4;
+static const uint32_t LOG_ARRAY_Y_DIM = 4;
 
 //static std::random_device rd;
 //static std::mt19937 gen(rd());

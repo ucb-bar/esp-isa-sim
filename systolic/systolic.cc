@@ -40,7 +40,7 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2)
         printf("SYSTOLIC: start mvin instruction\n");
 #endif 
       reg_t src_addr = xs1;
-      reg_t sp_addr = xs2;
+      reg_t sp_addr = xs2 << LOG_ARRAY_X_DIM;
       for (uint32_t j=0; j<ARRAY_X_DIM; j++) {
         systolic_state.SCRATCHPAD[sp_addr] = (int32_t)p->get_mmu()->load_uint8(src_addr);
 #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
@@ -57,7 +57,7 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2)
         printf("SYSTOLIC: start mvout instruction\n");
 #endif 
       reg_t dst_addr = xs1; 
-      reg_t sp_addr = xs2;
+      reg_t sp_addr = xs2 << LOG_ARRAY_X_DIM;
       for (uint32_t j=0; j<ARRAY_Y_DIM; j++) { 
         p->get_mmu()->store_uint8(dst_addr, systolic_state.SCRATCHPAD[sp_addr]);
 #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
@@ -89,10 +89,12 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2)
            systolic_state.PE_array_state[i][j] += systolic_state.SCRATCHPAD[a_addr + i*ARRAY_X_DIM + k] * systolic_state.SCRATCHPAD[b_addr + k*ARRAY_X_DIM + j];
           }
           if (systolic_state.output_sp_addr !=  0xFFFFFFFF)
+          {
 #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
              printf("SYSTOLIC: writing array state value %016x from PE %d,%d to scratchpad address %016x\n", systolic_state.PE_array_state[i][j], i, j, systolic_state.output_sp_addr + i*ARRAY_X_DIM + j);
 #endif 
              systolic_state.SCRATCHPAD[systolic_state.output_sp_addr + i*ARRAY_X_DIM + j] = (uint8_t) systolic_state.PE_array_state[i][j]; 
+          }
         }
       }
     }
@@ -110,10 +112,12 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2)
            systolic_state.PE_array_state[i][j] += systolic_state.SCRATCHPAD[a_addr + i*ARRAY_X_DIM + j] * systolic_state.SCRATCHPAD[b_addr + k*ARRAY_X_DIM + j];
           }
           if (systolic_state.output_sp_addr !=  0xFFFFFFFF)
+          {
 #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
              printf("SYSTOLIC: writing array state value %016x from PE %d,%d to scratchpad address %016x\n", systolic_state.PE_array_state[i][j], i, j, systolic_state.output_sp_addr + i*ARRAY_X_DIM + j);
 #endif 
              systolic_state.SCRATCHPAD[systolic_state.output_sp_addr + i*ARRAY_X_DIM + j] = (uint8_t) systolic_state.PE_array_state[i][j]; 
+          }
         }
       }
     }
