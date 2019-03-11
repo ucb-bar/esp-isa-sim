@@ -81,8 +81,8 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2)
 #endif 
         }
       }
-      reg_t a_addr = xs1;
-      reg_t b_addr = xs2;
+      reg_t a_addr = xs1 << LOG_ARRAY_X_DIM;
+      reg_t b_addr = xs2 << LOG_ARRAY_Y_DIM;
       for (uint32_t i=0; i<ARRAY_X_DIM; i++) {
         for (uint32_t j=0; j<ARRAY_Y_DIM; j++) {
           for (uint32_t k=0; k<ARRAY_X_DIM; k++) {
@@ -104,8 +104,8 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2)
 #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
       printf("SYSTOLIC: start matmul instruction (no preload) withh A_addr %016lx and B_addr %016lx instruction\n", xs1, xs2);
 #endif 
-      reg_t a_addr = xs1;
-      reg_t b_addr = xs2;
+      reg_t a_addr = xs1  << LOG_ARRAY_X_DIM;
+      reg_t b_addr = xs2  << LOG_ARRAY_Y_DIM;
       for (uint32_t i=0; i<ARRAY_X_DIM; i++) {
         for (uint32_t j=0; j<ARRAY_Y_DIM; j++) {
           for (uint32_t k=0; k<ARRAY_X_DIM; k++) {
@@ -124,8 +124,8 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2)
     //matmul.preload: input C scratchpad addr (XxX row major), output D scratchpad addr
     else if (insn.funct == 8)
     {
-      systolic_state.output_sp_addr = xs1;
-      systolic_state.preload_sp_addr = xs2;
+      systolic_state.output_sp_addr = xs1 << LOG_ARRAY_X_DIM;
+      systolic_state.preload_sp_addr = xs2 << LOG_ARRAY_X_DIM;
 #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
       printf("SYSTOLIC: set scratchpad output addr to %016x\n", systolic_state.output_sp_addr);
       printf("SYSTOLIC: set scratchpad preload addr to %016x\n", systolic_state.preload_sp_addr);
