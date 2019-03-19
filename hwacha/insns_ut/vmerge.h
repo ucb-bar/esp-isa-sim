@@ -1,4 +1,6 @@
-if(READ_PRD) 
+if(PRS3) { 
   WRITE_RD(RS1);
-else 
+}
+else {
   WRITE_RD(RS2);
+}
