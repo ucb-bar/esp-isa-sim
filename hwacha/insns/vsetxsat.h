@@ -3,6 +3,7 @@ if(!ENABLED)
 
 uint32_t vxsat = (uint32_t)XS1;
 WRITE_VXSAT(vxsat);
+WRITE_RD(vxsat);
 
 #ifdef RISCV_ENABLE_HCOMMITLOG
   printf("H: VSETXSAT %d\n", vxsat);

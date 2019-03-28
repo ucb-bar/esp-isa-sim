@@ -3,6 +3,7 @@ if(!ENABLED)
 
 uint32_t vxrm = (uint32_t)XS1;
 WRITE_VXRM(vxrm);
+WRITE_RD(vxrm);
 
 #ifdef RISCV_ENABLE_HCOMMITLOG
   printf("H: VSETXRM %d\n", vxrm);
