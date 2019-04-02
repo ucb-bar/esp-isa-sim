@@ -6,33 +6,18 @@
 #include <random>
 #include <limits>
 
-static const uint32_t MAX_SCRATCHPAD_SIZE = 256;
-static const uint32_t ARRAY_X_DIM = 16;
-static const uint32_t ARRAY_Y_DIM = 16;
-static const uint32_t LOG_ARRAY_X_DIM = 4;
-static const uint32_t LOG_ARRAY_Y_DIM = 4;
-
-//static std::random_device rd;
-//static std::mt19937 gen(rd());
-//static std::uniform_int_distribution<reg_t> reg_dis(std::numeric_limits<reg_t>::min(),
-//    std::numeric_limits<reg_t>::max());
-//static std::uniform_int_distribution<int> bool_dis(0,1);
-
 struct systolic_state_t
 {
-  void reset();
+  void reset(uint32_t data_width, uint32_t dim, uint32_t sp_banks, uint32_t sp_bank_entries);
 
-  uint8_t SCRATCHPAD[10*ARRAY_X_DIM*ARRAY_Y_DIM];
-  int32_t PE_array_state[ARRAY_X_DIM][ARRAY_Y_DIM];
-
-  uint32_t output_sp_addr;
-  uint32_t preload_sp_addr;
-  uint32_t dataflow_mode;
-  uint32_t fflags;
+  reg_t output_sp_addr;
+  reg_t preload_sp_addr;
+  reg_t dataflow_mode;
 
   bool enable;
+  std::vector<uint8_t> *spad;
+  std::vector<std::vector<int32_t>> *pe_state;
 };
-
 
 class systolic_t : public rocc_t
 {
@@ -41,24 +26,30 @@ public:
   const char* name() { return "systolic"; }
   reg_t custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2);
   void reset();
-  //void set_debug(bool value) { debug = value; }
-  //void set_processor(processor_t* _p) {
-  //  if(_p->get_max_xlen() != 64) throw std::logic_error("systolic requires rv64");
-  //  p = _p;
-  //}
 
-  systolic_state_t* get_sytolic_state() { return &systolic_state; }
-  //reg_t get_cause() { return cause; }
-  //reg_t get_aux() { return aux; }
-  //void take_exception(reg_t, reg_t);
-  //void clear_exception() { clear_interrupt(); }
+  void mvin(reg_t dram_addr, reg_t sp_addr);
+  void mvout(reg_t dram_addr, reg_t sp_addr);
+  void preload(reg_t d_addr, reg_t c_addr);
+  void setmode(reg_t mode);
+  void compute(reg_t a_addr, reg_t b_addr, bool preload);
 
-  //bool get_debug() { return debug; }
+  uint32_t row_bytes() { return dim * (data_width / 8); }
+  uint32_t data_width;
+  uint32_t dim;
+  uint32_t sp_banks;
+  uint32_t sp_bank_entries;
 
 private:
   systolic_state_t systolic_state;
   reg_t cause;
   reg_t aux;
+
+  const unsigned mvin_funct = 2;
+  const unsigned mvout_funct = 3;
+  const unsigned compute_preloaded_funct = 4;
+  const unsigned compute_accumulated_funct = 5;
+  const unsigned preload_funct = 6;
+  const unsigned setmode_funct = 0;
 
   bool debug;
 };
