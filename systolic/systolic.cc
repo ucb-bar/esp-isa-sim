@@ -20,6 +20,9 @@ void systolic_state_t::reset(uint32_t data_width, uint32_t dim, uint32_t sp_bank
   assert(dim > 0 && "Systolic --dim must be > 0");
   assert(dim * data_width % 8 == 0 && "Systolic row size must be byte-aligned");
 
+  // TODO: get it working for arbitrary data_widths
+  assert(data_width == 8 && "Only data_width = 8 is supported for now");
+
   enable = true;
   dataflow_mode = 0;
   output_sp_addr = 0;
@@ -73,8 +76,8 @@ void systolic_t::preload(reg_t d_addr, reg_t c_addr) {
   systolic_state.preload_sp_addr = d_addr;
   systolic_state.output_sp_addr = c_addr;
   #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-    printf("SYSTOLIC: preload - set scratchpad output addr to %016lx\n", systolic_state.output_sp_addr);
-    printf("SYSTOLIC: preload - set scratchpad preload addr to %016lx\n", systolic_state.preload_sp_addr);
+    printf("SYSTOLIC: preload - scratchpad output addr = %016lx, scratchpad preload addr = %016lx\n",
+            systolic_state.output_sp_addr, systolic_state.preload_sp_addr);
   #endif
 }
 
@@ -98,6 +101,7 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
         if (~systolic_state.preload_sp_addr == 0) {
           systolic_state.pe_state->at(i).at(j) = 0;
         } else {
+          // TODO: this needs to work for data_width != 8
           systolic_state.pe_state->at(i).at(j) =
                   (int32_t)systolic_state.spad->at(d_byte_addr + i*dim + j);
         }
@@ -116,6 +120,7 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
     for (size_t i = 0; i < dim; i++) {
       for (size_t j = 0; j < dim; j++) {
         for (size_t k = 0; k < dim; k++) {
+          // TODO: make it work for data_width != 8
           systolic_state.pe_state->at(i).at(j) +=
                   systolic_state.spad->at(a_byte_addr + k*dim + i) * systolic_state.spad->at(b_byte_addr + k*dim + j);
         }
