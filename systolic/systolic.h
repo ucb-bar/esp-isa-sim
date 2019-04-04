@@ -6,6 +6,8 @@
 #include <random>
 #include <limits>
 
+typedef int32_t pe_datatype;
+
 struct systolic_state_t
 {
   void reset(uint32_t data_width, uint32_t dim, uint32_t sp_banks, uint32_t sp_bank_entries);
@@ -16,7 +18,7 @@ struct systolic_state_t
 
   bool enable;
   std::vector<uint8_t> *spad;
-  std::vector<std::vector<int32_t>> *pe_state;
+  std::vector<std::vector<pe_datatype>> *pe_state;
 };
 
 class systolic_t : public rocc_t
@@ -34,6 +36,8 @@ public:
   void compute(reg_t a_addr, reg_t b_addr, bool preload);
 
   uint32_t row_bytes() { return dim * (data_width / 8); }
+  pe_datatype get_matrix_element(reg_t base_sp_addr, size_t i, size_t j);
+  void store_matrix_element(reg_t base_sp_addr, size_t i, size_t j, pe_datatype value);
   uint32_t data_width;
   uint32_t dim;
   uint32_t sp_banks;
