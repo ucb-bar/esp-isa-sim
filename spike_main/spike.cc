@@ -13,7 +13,6 @@
 #include <string>
 #include <memory>
 #include "../VERSION"
-#include <assert.h>
 
 static void help(int exit_code = 1)
 {
