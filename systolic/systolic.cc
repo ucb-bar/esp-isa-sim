@@ -9,24 +9,19 @@
 
 REGISTER_EXTENSION(systolic, []() { return new systolic_t; })
 
-void systolic_state_t::reset(uint32_t data_width, uint32_t dim, uint32_t sp_banks, uint32_t sp_bank_entries)
+void systolic_state_t::reset()
 {
-  assert(data_width != 0 && "Must pass --data-width=<dtype.width> (e.g. --data-width=8)");
-  assert(dim != 0 && "Must pass --dim=<tileRows*meshRows> (e.g. --dim=16)");
-  assert(sp_banks != 0 && "Must pass --sp_banks=<number of scratchpad banks> (e.g. --sp-banks=4)");
-
-  assert(data_width >= 8 && data_width <= 32 && "Systolic --data-width must be <= 32 bits and >= 8 bits");
-  assert((data_width & (data_width - 1)) == 0 && "Systolic --data-width must be a power of 2");
+  assert(sp_banks > 0 && "Systolic sp_banks must be > 0");
+  assert(data_width >= 8 && data_width <= 32 && "Systolic data_width must be <= 32 bits and >= 8 bits");
+  assert((data_width & (data_width - 1)) == 0 && "Systolic data_width must be a power of 2");
   assert(dim > 0 && "Systolic --dim must be > 0");
   assert(dim * data_width % 8 == 0 && "Systolic row size must be byte-aligned");
+  assert(sp_bank_entries >= dim && "Systolic sp_banks_entries must be >= dim");
 
   enable = true;
   dataflow_mode = 0;
   output_sp_addr = 0;
-  auto row_bytes = dim * (data_width / 8);
-  // If the user hasn't specified sp_bank_entries, assume enough space for the entire depth of the systolic array
-  auto sp_entries = sp_bank_entries == 0 ? dim : sp_bank_entries;
-  spad = new std::vector<uint8_t>(sp_banks * row_bytes * sp_entries);
+  spad = new std::vector<uint8_t>(sp_banks * row_bytes * sp_bank_entries);
   pe_state = new std::vector<std::vector<int32_t>>(dim, std::vector<int32_t>(dim));
 
   printf("Systolic extension configured with:\n");
@@ -34,16 +29,16 @@ void systolic_state_t::reset(uint32_t data_width, uint32_t dim, uint32_t sp_bank
   printf("    dim = %u\n", dim);
   printf("    sp_banks = %u\n", sp_banks);
   printf("    row_bytes = %u\n", row_bytes);
-  printf("    sp_entries = %u\n", sp_entries);
+  printf("    sp_bank_entries = %u\n", sp_bank_entries);
 }
 
 void systolic_t::reset() {
-  systolic_state.reset(data_width, dim, sp_banks, sp_bank_entries);
+  systolic_state.reset();
 }
 
 void systolic_t::mvin(reg_t dram_addr, reg_t sp_addr) {
-  auto sp_byte_addr = sp_addr * row_bytes();
-  for (uint32_t j = 0; j < row_bytes(); j++) {
+  auto sp_byte_addr = sp_addr * row_bytes;
+  for (uint32_t j = 0; j < row_bytes; j++) {
     systolic_state.spad->at(sp_byte_addr) = p->get_mmu()->load_uint8(dram_addr);
     #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
       printf("SYSTOLIC: mvin - value %08d from 0x%08lx to scratchpad byte addr 0x%08lx\n",
@@ -55,8 +50,8 @@ void systolic_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 }
 
 void systolic_t::mvout(reg_t dram_addr, reg_t sp_addr) {
-  auto sp_byte_addr = sp_addr * row_bytes();
-  for (uint32_t j = 0; j < row_bytes(); j++) {
+  auto sp_byte_addr = sp_addr * row_bytes;
+  for (uint32_t j = 0; j < row_bytes; j++) {
     p->get_mmu()->store_uint8(dram_addr, systolic_state.spad->at(sp_byte_addr));
     #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
       printf("SYSTOLIC: mvout - value %08d from scratchpad byte addr 0x%08lx to 0x%08lx\n",
@@ -119,7 +114,7 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
         if (~systolic_state.output_sp_addr != 0) {
           #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
             printf("SYSTOLIC: compute - writing array state value %08d from PE %02lu,%02lu to scratchpad base address 0x%08lx\n",
-                    systolic_state.pe_state->at(i).at(j), i, j, systolic_state.output_sp_addr*row_bytes() + i*dim+ j);
+                    systolic_state.pe_state->at(i).at(j), i, j, systolic_state.output_sp_addr*row_bytes + i*dim+ j);
           #endif
           store_matrix_element(systolic_state.output_sp_addr, i, j, systolic_state.pe_state->at(i).at(j));
         }
@@ -142,19 +137,20 @@ pe_datatype systolic_t::get_matrix_element(reg_t base_sp_addr, size_t i, size_t 
   // TODO: This doesn't sign extend the matrix element properly
   pe_datatype elem = 0;
   for (size_t byte = 0; byte < (data_width / 8); ++byte) {
-    elem = elem | (systolic_state.spad->at(base_sp_addr*row_bytes() + i*row_bytes() + j*(data_width/8) + byte) << 8*byte);
+    elem = elem | (systolic_state.spad->at(base_sp_addr*row_bytes + i*row_bytes + j*(data_width/8) + byte) << 8*byte);
   }
   return elem;
 }
 
 void systolic_t::store_matrix_element(reg_t base_sp_addr, size_t i, size_t j, pe_datatype value) {
   for (size_t byte = 0; byte < (data_width / 8); ++byte) {
-    systolic_state.spad->at(base_sp_addr*row_bytes() + i*row_bytes() + j*(data_width/8) + byte) =
+    systolic_state.spad->at(base_sp_addr*row_bytes + i*row_bytes + j*(data_width/8) + byte) =
             (uint8_t)((value >> 8*byte) & 0xFF);
   }
 }
 
 reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
+  printf("insn.funct %d\n", insn.funct);
   if (insn.funct == mvin_funct)
     mvin(xs1, xs2);
   else if (insn.funct == mvout_funct)
@@ -172,17 +168,6 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   return 0;
 }
 
-/*
-std::vector<insn_desc_t> rocc_t::get_instructions()
-{
-  std::vector<insn_desc_t> insns;
-  insns.push_back((insn_desc_t){0x0b, 0x7f, &::illegal_instruction, custom});
-  insns.push_back((insn_desc_t){0x2b, 0x7f, &::illegal_instruction, custom});
-  insns.push_back((insn_desc_t){0x5b, 0x7f, &::illegal_instruction, custom});
-  insns.push_back((insn_desc_t){0x7b, 0x7f, &::illegal_instruction, custom});
-  return insns;
-}
-*/
 std::vector<disasm_insn_t*> rocc_t::get_disasms()
 {
   std::vector<disasm_insn_t*> insns;
