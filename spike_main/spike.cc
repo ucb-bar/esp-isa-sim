@@ -5,7 +5,6 @@
 #include "remote_bitbang.h"
 #include "cachesim.h"
 #include "extension.h"
-#include "systolic.h"
 #include <dlfcn.h>
 #include <fesvr/option_parser.h>
 #include <stdio.h>
@@ -136,12 +135,6 @@ int main(int argc, char** argv)
   };
   std::vector<int> hartids;
 
-  // Systolic extension parameters
-  uint32_t data_width;
-  uint32_t dim;
-  uint32_t sp_banks;
-  uint32_t sp_bank_entries;
-
   auto const hartids_parser = [&](const char *s) {
     std::string const str(s);
     std::stringstream stream(str);
@@ -245,24 +238,6 @@ int main(int argc, char** argv)
       [&](const char* s){dm_config.support_haltgroups = false;});
   parser.option(0, "log-commits", 0, [&](const char* s){log_commits = true;});
 
-  // Systolic array extension parameters
-  parser.option(0, "data-width", 1, [&](const char* s){
-    assert(strcmp(extension()->name(), "systolic") == 0);
-    data_width = (uint32_t)strtoul(s, nullptr, 0);
-  });
-  parser.option(0, "dim", 1, [&](const char* s){
-    assert(strcmp(extension()->name(), "systolic") == 0);
-    dim = (uint32_t)strtoul(s, nullptr, 0);
-  });
-  parser.option(0, "sp-banks", 1, [&](const char* s){
-    assert(strcmp(extension()->name(), "systolic") == 0);
-    sp_banks = (uint32_t)strtoul(s, nullptr, 0);
-  });
-  parser.option(0, "sp-bank-entries", 1, [&](const char* s){
-    assert(strcmp(extension()->name(), "systolic") == 0);
-    sp_bank_entries = (uint32_t)strtoul(s, nullptr, 0);
-  });
-
   auto argv1 = parser.parse(argv);
   std::vector<std::string> htif_args(argv1, (const char*const*)argv + argc);
   if (mems.empty())
@@ -296,14 +271,7 @@ int main(int argc, char** argv)
     if (ic) s.get_core(i)->get_mmu()->register_memtracer(&*ic);
     if (dc) s.get_core(i)->get_mmu()->register_memtracer(&*dc);
     if (extension) {
-      extension_t* ext = extension();
-      if (strcmp(ext->name(), "systolic") == 0) {
-        ((systolic_t*)ext)->data_width = data_width;
-        ((systolic_t*)ext)->dim= dim;
-        ((systolic_t*)ext)->sp_banks = sp_banks;
-        ((systolic_t*)ext)->sp_bank_entries = sp_bank_entries;
-      }
-      s.get_core(i)->register_extension(ext);
+      s.get_core(i)->register_extension(extension());
       s.get_core(i)->reset();
     }
   }

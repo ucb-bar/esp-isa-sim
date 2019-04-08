@@ -7,10 +7,15 @@
 #include <limits>
 
 typedef int32_t pe_datatype;
+static const uint32_t data_width = 16;
+static const uint32_t dim = 4;
+static const uint32_t sp_banks = 14;
+static const uint32_t sp_bank_entries = dim;
+static const uint32_t row_bytes = dim * (data_width / 8);
 
 struct systolic_state_t
 {
-  void reset(uint32_t data_width, uint32_t dim, uint32_t sp_banks, uint32_t sp_bank_entries);
+  void reset();
 
   reg_t output_sp_addr;
   reg_t preload_sp_addr;
@@ -35,13 +40,8 @@ public:
   void setmode(reg_t mode);
   void compute(reg_t a_addr, reg_t b_addr, bool preload);
 
-  uint32_t row_bytes() { return dim * (data_width / 8); }
   pe_datatype get_matrix_element(reg_t base_sp_addr, size_t i, size_t j);
   void store_matrix_element(reg_t base_sp_addr, size_t i, size_t j, pe_datatype value);
-  uint32_t data_width;
-  uint32_t dim;
-  uint32_t sp_banks;
-  uint32_t sp_bank_entries;
 
 private:
   systolic_state_t systolic_state;
