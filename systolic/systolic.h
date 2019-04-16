@@ -19,7 +19,8 @@ struct systolic_state_t
 
   reg_t output_sp_addr;
   reg_t preload_sp_addr;
-  reg_t dataflow_mode;
+  reg_t mode;
+  reg_t shift;
 
   bool enable;
   std::vector<uint8_t> *spad;
@@ -37,7 +38,7 @@ public:
   void mvin(reg_t dram_addr, reg_t sp_addr);
   void mvout(reg_t dram_addr, reg_t sp_addr);
   void preload(reg_t d_addr, reg_t c_addr);
-  void setmode(reg_t mode);
+  void setmode(reg_t mode, reg_t shift);
   void compute(reg_t a_addr, reg_t b_addr, bool preload);
 
   pe_datatype get_matrix_element(reg_t base_sp_addr, size_t i, size_t j);
