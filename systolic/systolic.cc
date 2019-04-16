@@ -19,7 +19,8 @@ void systolic_state_t::reset()
   assert(sp_bank_entries >= dim && "Systolic sp_banks_entries must be >= dim");
 
   enable = true;
-  dataflow_mode = 0;
+  mode = 0;
+  shift = 0;
   output_sp_addr = 0;
   spad = new std::vector<uint8_t>(sp_banks * row_bytes * sp_bank_entries);
   pe_state = new std::vector<std::vector<int32_t>>(dim, std::vector<int32_t>(dim));
@@ -71,13 +72,17 @@ void systolic_t::preload(reg_t d_addr, reg_t c_addr) {
   #endif
 }
 
-void systolic_t::setmode(reg_t mode) {
-  // matmul.setmode: OS vs WS. takes in rs1, and interprets the LSB: 1 is OS, 0 is WS.
+// rs1 = 0 = OS, rs1 = 1 = WS
+// rs2 = right shift of 32 bit PE accumulator before storing to scratchpad
+void systolic_t::setmode(reg_t mode, reg_t shift) {
   assert(mode == 0 || mode == 1);
+  assert(shift >= 0 && shift < 32);
   #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-    printf("SYSTOLIC: setmode - set dataflow mode from %01lx to %01lx\n", systolic_state.dataflow_mode, mode);
+    printf("SYSTOLIC: setmode - set dataflow mode from %01lx to %01lx\n", systolic_state.mode, mode);
+    printf("SYSTOLIC: setmode - set shift from %01lx to %01lx\n", systolic_state.shift, shift);
   #endif
-  systolic_state.dataflow_mode = mode;
+  systolic_state.mode = mode;
+  systolic_state.shift = shift;
 }
 
 void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
@@ -103,7 +108,7 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
     }
   }
   // Output stationary
-  if (systolic_state.dataflow_mode == 0) {
+  if (systolic_state.mode == 0) {
     for (size_t i = 0; i < dim; i++) {
       for (size_t j = 0; j < dim; j++) {
         for (size_t k = 0; k < dim; k++) {
@@ -145,12 +150,12 @@ pe_datatype systolic_t::get_matrix_element(reg_t base_sp_addr, size_t i, size_t 
 void systolic_t::store_matrix_element(reg_t base_sp_addr, size_t i, size_t j, pe_datatype value) {
   for (size_t byte = 0; byte < (data_width / 8); ++byte) {
     systolic_state.spad->at(base_sp_addr*row_bytes + i*row_bytes + j*(data_width/8) + byte) =
-            (uint8_t)((value >> 8*byte) & 0xFF);
+            (uint8_t)(((value >> systolic_state.shift) >> 8*byte) & 0xFF);
   }
 }
 
 reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
-  printf("insn.funct %d\n", insn.funct);
+  insn.funct = (insn.funct & 0b111);
   if (insn.funct == mvin_funct)
     mvin(xs1, xs2);
   else if (insn.funct == mvout_funct)
@@ -158,7 +163,7 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   else if (insn.funct == preload_funct)
     preload(xs1, xs2);
   else if (insn.funct == setmode_funct)
-    setmode(xs1);
+    setmode(xs1, xs2);
   else if (insn.funct == compute_preloaded_funct)
     compute(xs1, xs2, true);
   else if (insn.funct == compute_accumulated_funct)
