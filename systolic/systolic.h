@@ -9,8 +9,8 @@
 typedef int32_t pe_datatype;
 static const uint32_t data_width = 16;
 static const uint32_t dim = 4;
-static const uint32_t sp_banks = 14;
-static const uint32_t sp_bank_entries = dim;
+static const uint32_t sp_banks = 16;
+static const uint32_t sp_bank_entries = 256;
 static const uint32_t row_bytes = dim * (data_width / 8);
 
 struct systolic_state_t
@@ -20,7 +20,10 @@ struct systolic_state_t
   reg_t output_sp_addr;
   reg_t preload_sp_addr;
   reg_t mode;
+  reg_t relu;
   reg_t shift;
+  reg_t load_stride;
+  reg_t store_stride;
 
   bool enable;
   std::vector<uint8_t> *spad;
@@ -38,7 +41,9 @@ public:
   void mvin(reg_t dram_addr, reg_t sp_addr);
   void mvout(reg_t dram_addr, reg_t sp_addr);
   void preload(reg_t d_addr, reg_t c_addr);
-  void setmode(reg_t mode, reg_t shift);
+  void setmode(reg_t relu, reg_t mode, reg_t shift);
+  void set_load_stride(reg_t stride);
+  void set_store_stride(reg_t stride);
   void compute(reg_t a_addr, reg_t b_addr, bool preload);
 
   pe_datatype get_matrix_element(reg_t base_sp_addr, size_t i, size_t j);
@@ -55,6 +60,10 @@ private:
   const unsigned compute_accumulated_funct = 5;
   const unsigned preload_funct = 6;
   const unsigned setmode_funct = 0;
+  const unsigned mode_subfunct = 1;
+  const unsigned setmode_subconfig = 1;
+  const unsigned load_subconfig = 1;
+  const unsigned store_subconfig = 2;
 
   bool debug;
 };

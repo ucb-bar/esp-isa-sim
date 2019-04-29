@@ -20,8 +20,11 @@ void systolic_state_t::reset()
 
   enable = true;
   mode = 0;
+  relu = 0;
   shift = 0;
   output_sp_addr = 0;
+  load_stride = row_bytes;
+  store_stride = row_bytes;
   spad = new std::vector<uint8_t>(sp_banks * row_bytes * sp_bank_entries);
   pe_state = new std::vector<std::vector<int32_t>>(dim, std::vector<int32_t>(dim));
 
@@ -39,27 +42,33 @@ void systolic_t::reset() {
 
 void systolic_t::mvin(reg_t dram_addr, reg_t sp_addr) {
   auto sp_byte_addr = sp_addr * row_bytes;
-  for (uint32_t j = 0; j < row_bytes; j++) {
-    systolic_state.spad->at(sp_byte_addr) = p->get_mmu()->load_uint8(dram_addr);
-    #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-      printf("SYSTOLIC: mvin - value %08d from 0x%08lx to scratchpad byte addr 0x%08lx\n",
-              systolic_state.spad->at(sp_byte_addr), dram_addr, sp_byte_addr);
-    #endif
-    dram_addr++;
-    sp_byte_addr++;
+  for (uint32_t i = 0; i < dim; i++) {
+    for (uint32_t j = 0; j < row_bytes; j++) {
+      systolic_state.spad->at(sp_byte_addr) = p->get_mmu()->load_uint8(dram_addr);
+      #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+        printf("SYSTOLIC: mvin - value %08d from 0x%08lx to scratchpad byte addr 0x%08lx\n",
+                systolic_state.spad->at(sp_byte_addr), dram_addr, sp_byte_addr);
+      #endif
+      dram_addr++;
+      sp_byte_addr++;
+    }
+    dram_addr += systolic_state.load_stride - row_bytes;
   }
 }
 
 void systolic_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   auto sp_byte_addr = sp_addr * row_bytes;
-  for (uint32_t j = 0; j < row_bytes; j++) {
-    p->get_mmu()->store_uint8(dram_addr, systolic_state.spad->at(sp_byte_addr));
-    #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-      printf("SYSTOLIC: mvout - value %08d from scratchpad byte addr 0x%08lx to 0x%08lx\n",
-             systolic_state.spad->at(sp_byte_addr), sp_byte_addr, dram_addr);
-    #endif
-    dram_addr++;
-    sp_byte_addr++;
+  for (uint32_t i = 0; i < dim; i++) {
+    for (uint32_t j = 0; j < row_bytes; j++) {
+      p->get_mmu()->store_uint8(dram_addr, systolic_state.spad->at(sp_byte_addr));
+      #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+        printf("SYSTOLIC: mvout - value %08d from scratchpad byte addr 0x%08lx to 0x%08lx\n",
+               systolic_state.spad->at(sp_byte_addr), sp_byte_addr, dram_addr);
+      #endif
+      dram_addr++;
+      sp_byte_addr++;
+    }
+    dram_addr += systolic_state.store_stride - row_bytes;
   }
 }
 
@@ -74,15 +83,34 @@ void systolic_t::preload(reg_t d_addr, reg_t c_addr) {
 
 // rs1 = 0 = OS, rs1 = 1 = WS
 // rs2 = right shift of 32 bit PE accumulator before storing to scratchpad
-void systolic_t::setmode(reg_t mode, reg_t shift) {
+void systolic_t::setmode(reg_t relu, reg_t mode, reg_t shift) {
   assert(mode == 0 || mode == 1);
+  assert(relu == 0 || relu == 1);
   assert(shift >= 0 && shift < 32);
   #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
     printf("SYSTOLIC: setmode - set dataflow mode from %01lx to %01lx\n", systolic_state.mode, mode);
+    printf("SYSTOLIC: setmode - set relu activation function from %01lx to %01lx\n", systolic_state.relu, relu);
     printf("SYSTOLIC: setmode - set shift from %01lx to %01lx\n", systolic_state.shift, shift);
   #endif
   systolic_state.mode = mode;
+  systolic_state.relu = relu;
   systolic_state.shift = shift;
+}
+
+void systolic_t::set_load_stride(reg_t stride) {
+  assert(stride >= 0);
+  #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+    printf("SYSTOLIC: setloadconfig - set load stride from %01lx to %01lx\n", systolic_state.load_stride, stride);
+  #endif
+  systolic_state.load_stride = stride;
+}
+
+void systolic_t::set_store_stride(reg_t stride) {
+  assert(stride >= 0);
+  #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+    printf("SYSTOLIC: setstoreconfig - set store stride from %01lx to %01lx\n", systolic_state.store_stride, stride);
+  #endif
+  systolic_state.store_stride = stride;
 }
 
 void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
@@ -98,7 +126,7 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
             printf("SYSTOLIC: compute - writing preload value 0 to PE %02lu,%02lu\n", i, j);
           #endif
         } else {
-          systolic_state.pe_state->at(i).at(j) = get_matrix_element(systolic_state.preload_sp_addr, i, j);
+          systolic_state.pe_state->at(i).at(j) = (pe_datatype)get_matrix_element(systolic_state.preload_sp_addr, i, j);
           #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
             printf("SYSTOLIC: compute - writing preload value %08d from scratchpad base address 0x%08lx to PE %02lu,%02lu\n",
                    systolic_state.pe_state->at(i).at(j), systolic_state.preload_sp_addr, i, j);
@@ -114,14 +142,22 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
         for (size_t k = 0; k < dim; k++) {
           systolic_state.pe_state->at(i).at(j) +=
                   // A is stored transposed in the scratchpad
-                  get_matrix_element(a_addr, k, i) * get_matrix_element(b_addr, k, j);
+                  (pe_datatype)get_matrix_element(a_addr, i, k) * (pe_datatype)get_matrix_element(b_addr, k, j);
         }
         if (~systolic_state.output_sp_addr != 0) {
           #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
             printf("SYSTOLIC: compute - writing array state value %08d from PE %02lu,%02lu to scratchpad base address 0x%08lx\n",
                     systolic_state.pe_state->at(i).at(j), i, j, systolic_state.output_sp_addr*row_bytes + i*dim+ j);
           #endif
-          store_matrix_element(systolic_state.output_sp_addr, i, j, systolic_state.pe_state->at(i).at(j));
+          if ((systolic_state.relu == 1) && ((pe_datatype)(systolic_state.pe_state->at(i).at(j)) < 0)) {
+            store_matrix_element(systolic_state.output_sp_addr, i, j, 0);
+            #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+              printf("SYSTOLIC: compute - RELU zeroed the value %08d from PE %02lu,%02lu in scratchpad base address 0x%08lx\n",
+                    systolic_state.pe_state->at(i).at(j), i, j, systolic_state.output_sp_addr*row_bytes + i*dim+ j);
+            #endif
+          } else {
+            store_matrix_element(systolic_state.output_sp_addr, i, j, systolic_state.pe_state->at(i).at(j));
+          }
         }
       }
     }
@@ -162,8 +198,15 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     mvout(xs1, xs2);
   else if (insn.funct == preload_funct)
     preload(xs1, xs2);
-  else if (insn.funct == setmode_funct)
-    setmode(xs1, xs2);
+  else if (insn.funct == setmode_funct) {
+    if ((xs1 & 0x11) == load_subconfig) {
+      set_load_stride(xs2);
+    } else if ((xs1 & 0x11) == store_subconfig) {
+      set_store_stride(xs2);
+    } else {
+      setmode((xs1 >> 3) & 0x1, (xs1 >> 2) & 0x1, xs2);
+    }
+  }
   else if (insn.funct == compute_preloaded_funct)
     compute(xs1, xs2, true);
   else if (insn.funct == compute_accumulated_funct)
