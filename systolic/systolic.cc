@@ -12,8 +12,8 @@ REGISTER_EXTENSION(systolic, []() { return new systolic_t; })
 void systolic_state_t::reset()
 {
   enable = true;
-  mode = 0;
-  relu = 0;
+  mode = OS;
+  act = NONE;
   shift = 0;
   output_sp_addr = 0;
   load_stride = row_bytes;
@@ -36,10 +36,11 @@ void systolic_t::mvin(reg_t dram_addr, reg_t sp_addr) {
   for (size_t row_idx = 0; row_idx < dim; ++row_idx) {
     for (size_t col_idx = 0; col_idx < dim; ++col_idx) {
       auto const sp_row_addr = sp_addr + row_idx;
-      systolic_state.spad->at(sp_row_addr).at(col_idx) = 0;
       auto const dram_byte_addr = dram_addr + row_idx*systolic_state.load_stride + col_idx*sizeof(input_t);
+      systolic_state.spad->at(sp_row_addr).at(col_idx) = 0;
       for (size_t byte_idx = 0; byte_idx < sizeof(input_t); ++byte_idx) {
-        systolic_state.spad->at(sp_row_addr).at(col_idx) |= p->get_mmu()->load_uint8(dram_byte_addr + byte_idx) << (byte_idx*8);
+        systolic_state.spad->at(sp_row_addr).at(col_idx) |=
+                p->get_mmu()->load_uint8(dram_byte_addr + byte_idx) << (byte_idx*8);
       }
       #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
       printf("SYSTOLIC: mvin - value %08d from 0x%08lx to scratchpad addr 0x%08lx\n",
@@ -55,7 +56,8 @@ void systolic_t::mvout(reg_t dram_addr, reg_t sp_addr) {
       auto const sp_row_addr = sp_addr + row_idx;
       auto const dram_byte_addr = dram_addr + row_idx*systolic_state.store_stride + col_idx*sizeof(input_t);
       for (size_t byte_idx = 0; byte_idx < sizeof(input_t); ++byte_idx) {
-        p->get_mmu()->store_uint8(dram_byte_addr + byte_idx, static_cast<uint8_t>((systolic_state.spad->at(sp_row_addr).at(col_idx) >> (byte_idx*8)) & 0xFF));
+        p->get_mmu()->store_uint8(dram_byte_addr + byte_idx,
+                static_cast<uint8_t>((systolic_state.spad->at(sp_row_addr).at(col_idx) >> (byte_idx*8)) & 0xFF));
       }
       #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
       printf("SYSTOLIC: mvout - value %08d from scratchpad addr 0x%08lx to 0x%08lx\n",
@@ -74,36 +76,46 @@ void systolic_t::preload(reg_t d_addr, reg_t c_addr) {
   #endif
 }
 
-// rs1 = 0 = OS, rs1 = 1 = WS
-// rs2 = right shift of 32 bit PE accumulator before storing to scratchpad
-void systolic_t::setmode(reg_t relu, reg_t mode, reg_t shift) {
-  assert(mode == 0 || mode == 1);
-  assert(relu == 0 || relu == 1);
-  assert(shift >= 0 && shift < 32);
-  #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-    printf("SYSTOLIC: setmode - set dataflow mode from %01lx to %01lx\n", systolic_state.mode, mode);
-    printf("SYSTOLIC: setmode - set relu activation function from %01lx to %01lx\n", systolic_state.relu, relu);
-    printf("SYSTOLIC: setmode - set shift from %01lx to %01lx\n", systolic_state.shift, shift);
-  #endif
-  systolic_state.mode = mode;
-  systolic_state.relu = relu;
-  systolic_state.shift = shift;
-}
+void systolic_t::setmode(reg_t rs1, reg_t rs2) {
+  if ((rs1 & 0b11) == 0) { // rs1[1:0] == 2'b00, config_ex, configure execute pipeline
+    systolic_state_t::Dataflow new_mode;
+    systolic_state_t::Activation new_act;
+    reg_t new_shift;
 
-void systolic_t::set_load_stride(reg_t stride) {
-  assert(stride >= 0);
-  #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-    printf("SYSTOLIC: setloadconfig - set load stride from %01lx to %01lx\n", systolic_state.load_stride, stride);
-  #endif
-  systolic_state.load_stride = stride;
-}
+    auto rs1_2 = (rs1 >> 1) & 0b1; // extract rs1[2], 0 = output stationary, 1 = weight stationary
+    if (rs1_2 == 0) {
+      new_mode = systolic_state_t::OS;
+    } else {
+      new_mode = systolic_state_t::WS;
+    }
 
-void systolic_t::set_store_stride(reg_t stride) {
-  assert(stride >= 0);
-  #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-    printf("SYSTOLIC: setstoreconfig - set store stride from %01lx to %01lx\n", systolic_state.store_stride, stride);
-  #endif
-  systolic_state.store_stride = stride;
+    auto rs1_4_3 = (rs1 >> 2) & 0b11; // extract rs1[4:3], 0 = no activation, 1 = ReLU, 2 = ReLU6
+    if (rs1_4_3 == 0) {
+      new_act = systolic_state_t::NONE;
+    } else if (rs1_4_3 == 1) {
+      new_act = systolic_state_t::RELU;
+    } else if (rs1_4_3 == 2) {
+      new_act = systolic_state_t::RELU6;
+    } else {
+      assert(false);
+    }
+
+    new_shift = rs2;
+    assert(new_shift >= 0 && new_shift < 32);
+
+    #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+    printf("SYSTOLIC: config_ex - set dataflow mode from %d to %d\n", systolic_state.mode, new_mode);
+    printf("SYSTOLIC: config_ex - set activation function from %d to %d\n", systolic_state.act, new_act);
+    printf("SYSTOLIC: config_ex - set shift from %01lx to %01lx\n", systolic_state.shift, rs2);
+    #endif
+    systolic_state.mode = new_mode;
+    systolic_state.act = new_act;
+    systolic_state.shift = new_shift;
+  } else if ((rs1 & 0b11) == 1) { // rs1[1:0] == 2'b01, config_mvin, configure load pipeline
+    systolic_state.load_stride = rs2;
+  } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
+    systolic_state.store_stride = rs2;
+  }
 }
 
 void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
@@ -142,7 +154,7 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
             printf("SYSTOLIC: compute - writing array state value %08d from PE %02lu,%02lu to scratchpad base address 0x%08lx\n",
                     systolic_state.pe_state->at(i).at(j), i, j, systolic_state.output_sp_addr*row_bytes + i*dim+ j);
           #endif
-          if ((systolic_state.relu == 1) && ((accum_t)(systolic_state.pe_state->at(i).at(j)) < 0)) {
+          if ((systolic_state.act == 1) && ((accum_t)(systolic_state.pe_state->at(i).at(j)) < 0)) {
             store_matrix_element(systolic_state.output_sp_addr, i, j, 0);
             #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
               printf("SYSTOLIC: compute - RELU zeroed the value %08d from PE %02lu,%02lu in scratchpad base address 0x%08lx\n",
@@ -195,15 +207,8 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     mvout(xs1, xs2);
   else if (insn.funct == preload_funct)
     preload(xs1, xs2);
-  else if (insn.funct == setmode_funct) {
-    if ((xs1 & 0x11) == load_subconfig) {
-      set_load_stride(xs2);
-    } else if ((xs1 & 0x11) == store_subconfig) {
-      set_store_stride(xs2);
-    } else {
-      setmode((xs1 >> 3) & 0x1, (xs1 >> 2) & 0x1, xs2);
-    }
-  }
+  else if (insn.funct == setmode_funct)
+    setmode(xs1, xs2);
   else if (insn.funct == compute_preloaded_funct)
     compute(xs1, xs2, true);
   else if (insn.funct == compute_accumulated_funct)
