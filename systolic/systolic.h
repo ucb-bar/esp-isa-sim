@@ -6,12 +6,13 @@
 #include <random>
 #include <limits>
 
-typedef int32_t pe_datatype;
-static const uint32_t data_width = 16;
-static const uint32_t dim = 4;
-static const uint32_t sp_banks = 16;
-static const uint32_t sp_bank_entries = 256;
-static const uint32_t row_bytes = dim * (data_width / 8);
+typedef int16_t input_t; // Systolic array input datatype (feeding into PEs, moving out of accumulator)
+typedef int16_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
+typedef int32_t accum_t; // Accumulator datatype (inside PEs for OS dataflow and for the external accumulator)
+static const uint32_t dim = 4; // Square dimension of systolic array
+static const uint32_t sp_matrices = 256; // Size the scratchpad to fit sp_matrices matrices
+static const uint32_t row_bytes = dim * sizeof(input_t); // Bytes fed into the systolic array along one axis in one cycle
+static const uint32_t accum_rows = 32; // Number of systolic array rows in the accumulator
 
 struct systolic_state_t
 {
@@ -26,8 +27,9 @@ struct systolic_state_t
   reg_t store_stride;
 
   bool enable;
-  std::vector<uint8_t> *spad;
-  std::vector<std::vector<pe_datatype>> *pe_state;
+  std::vector<std::vector<input_t>> *spad; // Scratchpad constructed as systolic array rows
+  std::vector<std::vector<accum_t>> *pe_state; // Stores the PE's internal accumulator state
+  std::vector<std::vector<accum_t>> *accumulator;
 };
 
 class systolic_t : public rocc_t
@@ -46,8 +48,8 @@ public:
   void set_store_stride(reg_t stride);
   void compute(reg_t a_addr, reg_t b_addr, bool preload);
 
-  pe_datatype get_matrix_element(reg_t base_sp_addr, size_t i, size_t j);
-  void store_matrix_element(reg_t base_sp_addr, size_t i, size_t j, pe_datatype value);
+  accum_t get_matrix_element(reg_t base_sp_addr, size_t i, size_t j);
+  void store_matrix_element(reg_t base_sp_addr, size_t i, size_t j, accum_t value);
 
 private:
   systolic_state_t systolic_state;
