@@ -16,19 +16,21 @@ static const uint32_t accum_rows = 32; // Number of systolic array rows in the a
 
 struct systolic_state_t
 {
+  enum Dataflow {OS, WS};
+  enum Activation {NONE, RELU, RELU6};
   void reset();
 
   reg_t output_sp_addr;
   reg_t preload_sp_addr;
-  reg_t mode;
-  reg_t relu;
+  Dataflow mode;
+  Activation act;
   reg_t shift;
   reg_t load_stride;
   reg_t store_stride;
 
   bool enable;
   std::vector<std::vector<input_t>> *spad; // Scratchpad constructed as systolic array rows
-  std::vector<std::vector<accum_t>> *pe_state; // Stores the PE's internal accumulator state
+  std::vector<std::vector<accum_t>> *pe_state; // Stores each PE's internal accumulator state
   std::vector<std::vector<accum_t>> *accumulator;
 };
 
@@ -43,9 +45,7 @@ public:
   void mvin(reg_t dram_addr, reg_t sp_addr);
   void mvout(reg_t dram_addr, reg_t sp_addr);
   void preload(reg_t d_addr, reg_t c_addr);
-  void setmode(reg_t relu, reg_t mode, reg_t shift);
-  void set_load_stride(reg_t stride);
-  void set_store_stride(reg_t stride);
+  void setmode(reg_t rs1, reg_t rs2);
   void compute(reg_t a_addr, reg_t b_addr, bool preload);
 
   accum_t get_matrix_element(reg_t base_sp_addr, size_t i, size_t j);
@@ -56,16 +56,12 @@ private:
   reg_t cause;
   reg_t aux;
 
+  const unsigned setmode_funct = 0;
   const unsigned mvin_funct = 2;
   const unsigned mvout_funct = 3;
   const unsigned compute_preloaded_funct = 4;
   const unsigned compute_accumulated_funct = 5;
   const unsigned preload_funct = 6;
-  const unsigned setmode_funct = 0;
-  const unsigned mode_subfunct = 1;
-  const unsigned setmode_subconfig = 1;
-  const unsigned load_subconfig = 1;
-  const unsigned store_subconfig = 2;
 
   bool debug;
 };
