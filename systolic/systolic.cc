@@ -16,15 +16,14 @@ void systolic_state_t::reset()
   act = NONE;
   shift = 0;
   output_sp_addr = 0;
-  load_stride = row_bytes;
-  store_stride = row_bytes;
+  load_stride = dim * sizeof(input_t);
+  store_stride = dim * sizeof(input_t);
   spad = new std::vector<std::vector<input_t>>(sp_matrices*dim, std::vector<input_t>(dim));
   pe_state = new std::vector<std::vector<accum_t>>(dim, std::vector<accum_t>(dim));
   accumulator = new std::vector<std::vector<accum_t>>(accum_rows, std::vector<accum_t>(dim));
 
   printf("Systolic extension configured with:\n");
   printf("    dim = %u\n", dim);
-  printf("    row_bytes = %u\n", row_bytes);
 }
 
 void systolic_t::reset() {
@@ -82,7 +81,7 @@ void systolic_t::setmode(reg_t rs1, reg_t rs2) {
     systolic_state_t::Activation new_act;
     reg_t new_shift;
 
-    auto rs1_2 = (rs1 >> 1) & 0b1; // extract rs1[2], 0 = output stationary, 1 = weight stationary
+    auto rs1_2 = (rs1 >> 2) & 0b1; // extract rs1[2], 0 = output stationary, 1 = weight stationary
     if (rs1_2 == 0) {
       new_mode = systolic_state_t::OS;
     } else {
@@ -198,11 +197,6 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
         #endif
       }
     }
-    /*
-  } else {
-    store_matrix_element(systolic_state.output_sp_addr, i, j, systolic_state.pe_state->at(i).at(j));
-  }
-     */
   }
 }
 
@@ -226,11 +220,11 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
 }
 
 output_t systolic_t::rounding_saturating_shift(accum_t value) {
+  // Implementation taken from systolic-rocc-tests/include/systolic.h (matshift() function)
   int divisor = 1 << systolic_state.shift;
   // Bitshift and round element
-  int64_t abs = value > 0 ? value : -value; //full[r][c] > 0 ? full[r][c] : -full[r][c];
+  int64_t abs = value > 0 ? value : -value;
   int64_t shifted = (abs + (divisor/2)) / divisor;
-  //if (full[r][c] < 0)
   if (value < 0)
     shifted = -shifted;
 
