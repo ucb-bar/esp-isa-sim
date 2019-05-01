@@ -64,6 +64,7 @@ private:
   const unsigned preload_funct = 6;
 
   bool debug;
+  output_t rounding_saturating_shift(accum_t value);
 };
 
 #endif
