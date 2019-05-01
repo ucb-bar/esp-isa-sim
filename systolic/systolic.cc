@@ -89,7 +89,7 @@ void systolic_t::setmode(reg_t rs1, reg_t rs2) {
       new_mode = systolic_state_t::WS;
     }
 
-    auto rs1_4_3 = (rs1 >> 2) & 0b11; // extract rs1[4:3], 0 = no activation, 1 = ReLU, 2 = ReLU6
+    auto rs1_4_3 = (rs1 >> 3) & 0b11; // extract rs1[4:3], 0 = no activation, 1 = ReLU, 2 = ReLU6
     if (rs1_4_3 == 0) {
       new_act = systolic_state_t::NONE;
     } else if (rs1_4_3 == 1) {
@@ -122,47 +122,33 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
   #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
     printf("SYSTOLIC: compute - preload = %d, scratchpad A addr = 0x%08lx, scratchpad B addr 0x%08lx\n", preload, a_addr, b_addr);
   #endif
+
+  // Preload
   if (preload) {
     for (size_t i = 0; i < dim; i++) {
       for (size_t j = 0; j < dim; j++) {
         if (~systolic_state.preload_sp_addr == 0) {
           systolic_state.pe_state->at(i).at(j) = 0;
           #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-            printf("SYSTOLIC: compute - writing preload value 0 to PE %02lu,%02lu\n", i, j);
+            printf("SYSTOLIC: compute - PE %02lu,%02lu preloaded with 0\n", i, j);
           #endif
         } else {
-          systolic_state.pe_state->at(i).at(j) = (accum_t)get_matrix_element(systolic_state.preload_sp_addr, i, j);
+          systolic_state.pe_state->at(i).at(j) = systolic_state.spad->at(systolic_state.preload_sp_addr + i).at(j);
           #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-            printf("SYSTOLIC: compute - writing preload value %08d from scratchpad base address 0x%08lx to PE %02lu,%02lu\n",
-                   systolic_state.pe_state->at(i).at(j), systolic_state.preload_sp_addr, i, j);
+            printf("SYSTOLIC: compute - PE %02lu,%02lu preloaded with %08d from scratchpad address 0x%08lx\n",
+                   i, j, systolic_state.pe_state->at(i).at(j), systolic_state.preload_sp_addr + i);
           #endif
         }
       }
     }
   }
-  // Output stationary
-  if (systolic_state.mode == 0) {
-    for (size_t i = 0; i < dim; i++) {
-      for (size_t j = 0; j < dim; j++) {
-        for (size_t k = 0; k < dim; k++) {
-          systolic_state.pe_state->at(i).at(j) +=
-                  // A is stored transposed in the scratchpad
-                  (accum_t)get_matrix_element(a_addr, i, k) * (accum_t)get_matrix_element(b_addr, k, j);
-        }
-        if (~systolic_state.output_sp_addr != 0) {
-          #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-            printf("SYSTOLIC: compute - writing array state value %08d from PE %02lu,%02lu to scratchpad base address 0x%08lx\n",
-                    systolic_state.pe_state->at(i).at(j), i, j, systolic_state.output_sp_addr*row_bytes + i*dim+ j);
-          #endif
-          if ((systolic_state.act == 1) && ((accum_t)(systolic_state.pe_state->at(i).at(j)) < 0)) {
-            store_matrix_element(systolic_state.output_sp_addr, i, j, 0);
-            #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-              printf("SYSTOLIC: compute - RELU zeroed the value %08d from PE %02lu,%02lu in scratchpad base address 0x%08lx\n",
-                    systolic_state.pe_state->at(i).at(j), i, j, systolic_state.output_sp_addr*row_bytes + i*dim+ j);
-            #endif
-          } else {
-            store_matrix_element(systolic_state.output_sp_addr, i, j, systolic_state.pe_state->at(i).at(j));
-          }
+
+  // Compute
+  if (systolic_state.mode == systolic_state_t::OS) {
+    for (size_t i = 0; i < dim; ++i) {
+      for (size_t j = 0; j < dim; ++j) {
+        for (size_t k = 0; k < dim; ++k) {
+          systolic_state.pe_state->at(i).at(j) += systolic_state.spad->at(a_addr + i).at(k) * systolic_state.spad->at(b_addr + k).at(j);
         }
       }
     }
@@ -170,33 +156,54 @@ void systolic_t::compute(reg_t a_addr, reg_t b_addr, bool preload) {
   else {
     assert(false && "Weight stationary dataflow not supported");
   }
-}
 
-/**
- * Get an element of a matrix stored at the scratchpad address (base_sp_addr)
- * @param base_sp_addr
- * @param i Row index
- * @param j Column index
- * @return The extracted matrix element casted up to pe_datatype
- */
-accum_t systolic_t::get_matrix_element(reg_t base_sp_addr, size_t i, size_t j) {
-  // TODO: This doesn't sign extend the matrix element properly
-  accum_t elem = 0;
-  /*
-  for (size_t byte = 0; byte < (data_width / 8); ++byte) {
-    elem = elem | (systolic_state.spad->at(base_sp_addr*row_bytes + i*row_bytes + j*(data_width/8) + byte) << 8*byte);
-  }
-   */
-  return elem;
-}
+  for (size_t i = 0; i < dim; ++i) {
+    for (size_t j = 0; j < dim; ++j) {
+      #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+      printf("SYSTOLIC: compute - PE %02lu,%02lu computed matmul result %08d\n",
+             i, j, systolic_state.pe_state->at(i).at(j));
+      #endif
 
-void systolic_t::store_matrix_element(reg_t base_sp_addr, size_t i, size_t j, accum_t value) {
-  /*
-  for (size_t byte = 0; byte < (data_width / 8); ++byte) {
-    systolic_state.spad->at(base_sp_addr*row_bytes + i*row_bytes + j*(data_width/8) + byte) =
-            (uint8_t)(((value >> systolic_state.shift) >> 8*byte) & 0xFF);
+    }
   }
-   */
+
+  // Write results to scratchpad
+  // TODO: handle writing to accumulator
+  if (~systolic_state.output_sp_addr != 0) {
+    for (size_t i = 0; i < dim; ++i) {
+      for (size_t j = 0; j < dim; ++j) {
+        // Perform rounding shift and saturating cast to output_t
+        accum_t value = systolic_state.pe_state->at(i).at(j);
+        output_t shifted = rounding_saturating_shift(value);
+
+        // Apply activation function
+        output_t activated = shifted; // default to no activation function
+        if (systolic_state.act == systolic_state_t::RELU) {
+          activated = shifted > 0 ? shifted : static_cast<output_t>(0);
+        } else if (systolic_state.act == systolic_state_t::RELU6) {
+          auto positive = shifted > 0 ? shifted : static_cast<output_t>(0);
+          activated = shifted > 6 ? static_cast<output_t>(6) : positive;
+        }
+
+        #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+        printf("SYSTOLIC: compute - PE %02lu,%02lu applied shift and activation to get %08d\n",
+               i, j, activated);
+        #endif
+
+        // Move to scratchpad // TODO: is there a special case when sizeof(output_t) != sizeof(input_t)
+        systolic_state.spad->at(systolic_state.output_sp_addr + i).at(j) = activated;
+        #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+          printf("SYSTOLIC: compute - PE %02lu,%02lu wrote value %08d to scratchpad address 0x%08lx\n",
+                 i, j, systolic_state.pe_state->at(i).at(j), systolic_state.output_sp_addr + i);
+        #endif
+      }
+    }
+    /*
+  } else {
+    store_matrix_element(systolic_state.output_sp_addr, i, j, systolic_state.pe_state->at(i).at(j));
+  }
+     */
+  }
 }
 
 reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
@@ -216,6 +223,22 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   else
     illegal_instruction();
   return 0;
+}
+
+output_t systolic_t::rounding_saturating_shift(accum_t value) {
+  int divisor = 1 << systolic_state.shift;
+  // Bitshift and round element
+  int64_t abs = value > 0 ? value : -value; //full[r][c] > 0 ? full[r][c] : -full[r][c];
+  int64_t shifted = (abs + (divisor/2)) / divisor;
+  //if (full[r][c] < 0)
+  if (value < 0)
+    shifted = -shifted;
+
+  // Saturate and cast element
+  auto elem_t_max = std::numeric_limits<input_t>::max();
+  auto elem_t_min = std::numeric_limits<input_t>::min();
+  int64_t elem = shifted > elem_t_max ? elem_t_max : (shifted < elem_t_min ? elem_t_min : shifted);
+  return elem;
 }
 
 std::vector<disasm_insn_t*> rocc_t::get_disasms()
