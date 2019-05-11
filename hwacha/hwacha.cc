@@ -13,6 +13,7 @@ void ct_state_t::reset()
   maxvl = 8;
   vl = 0;
   count = 0;
+  reduction = 0;
   prec = 64;
   
   //inherited from control processor
