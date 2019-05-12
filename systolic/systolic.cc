@@ -64,11 +64,10 @@ void systolic_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   for (size_t row_idx = 0; row_idx < dim; ++row_idx) {
     for (size_t col_idx = 0; col_idx < dim; ++col_idx) {
       if (((sp_addr >> 31) & 0x1) == 1) { // Accumulator
-        // TODO: can we mvout from the accumulator to DRAM with the full data width (accum_t)?
         // Apply shift when moving out of accumulator using WS dataflow
         auto const acc_row_addr = (sp_addr & 0x3FFFFFFF) + row_idx;
         accum_t acc_value = systolic_state.accumulator->at(acc_row_addr).at(col_idx);
-        output_t shifted = systolic_state.mode == systolic_state_t::WS ? rounding_saturating_shift(acc_value) : static_cast<output_t>(acc_value);
+        input_t shifted = in_rounding_saturating_shift(acc_value, systolic_state.shift);
         input_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
         auto const dram_byte_addr = dram_addr + row_idx*systolic_state.store_stride + col_idx*sizeof(input_t);
@@ -222,17 +221,19 @@ void systolic_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
     for (size_t i = 0; i < dim; ++i) {
       for (size_t j = 0; j < dim; ++j) {
         accum_t value = systolic_state.mode == systolic_state_t::OS ? systolic_state.pe_state->at(i).at(j) : results->at(i).at(j);
-        // Perform rounding shift and saturating cast to output_t (only for OS mode)
-        output_t shifted = systolic_state.mode == systolic_state_t::OS ? rounding_saturating_shift(value) : static_cast<output_t>(value);
-        // TODO: is there a special case when sizeof(output_t) != sizeof(input_t)
-
         if (((systolic_state.output_sp_addr >> 31) & 0x1) == 1) { // Move to accumulator
+          output_t shifted = systolic_state.mode == systolic_state_t::OS ?
+                  out_rounding_saturating_shift(value, systolic_state.shift) :
+                  out_rounding_saturating_shift(value, 0);
           if (((systolic_state.output_sp_addr >> 30) & 0x1) == 1) { // Accumulate on top of existing accumulator value
             systolic_state.accumulator->at((systolic_state.output_sp_addr & 0x3FFFFFFF) + i).at(j) += shifted;
           } else { // Overwrite
             systolic_state.accumulator->at((systolic_state.output_sp_addr & 0x3FFFFFFF) + i).at(j) = shifted;
           }
         } else { // Move to scratchpad, apply activation along the way
+          input_t shifted = systolic_state.mode == systolic_state_t::OS ?
+                             in_rounding_saturating_shift(value, systolic_state.shift) :
+                             in_rounding_saturating_shift(value, 0);
           input_t activated = apply_activation(shifted);
           systolic_state.spad->at(systolic_state.output_sp_addr + i).at(j) = activated;
           #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
@@ -266,7 +267,7 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
 
 // Applying activation from PE post-shifted output to scratchpad (for OS dataflow)
 // or from accumulator to DRAM (after shifting, for WS dataflow)
-input_t systolic_t::apply_activation(output_t value) {
+input_t systolic_t::apply_activation(input_t value) {
   if (systolic_state.act == systolic_state_t::RELU) {
     return value > 0 ? static_cast<input_t>(value) : static_cast<input_t>(0);
   } else if (systolic_state.act == systolic_state_t::RELU6) {
@@ -277,9 +278,25 @@ input_t systolic_t::apply_activation(output_t value) {
   } else assert(false);
 }
 
-output_t systolic_t::rounding_saturating_shift(accum_t value) {
+output_t systolic_t::out_rounding_saturating_shift(accum_t value, uint64_t shift) {
   // Implementation taken from systolic-rocc-tests/include/systolic.h (matshift() function)
-  int divisor = 1 << systolic_state.shift;
+  int divisor = 1 << shift;
+  // Bitshift and round element
+  int64_t abs = value > 0 ? value : -value;
+  int64_t shifted = (abs + (divisor/2)) / divisor;
+  if (value < 0)
+    shifted = -shifted;
+
+  // Saturate and cast element
+  auto elem_t_max = std::numeric_limits<output_t>::max();
+  auto elem_t_min = std::numeric_limits<output_t>::min();
+  int64_t elem = shifted > elem_t_max ? elem_t_max : (shifted < elem_t_min ? elem_t_min : shifted);
+  return static_cast<output_t>(elem);
+}
+
+input_t systolic_t::in_rounding_saturating_shift(accum_t value, uint64_t shift) {
+  // Implementation taken from systolic-rocc-tests/include/systolic.h (matshift() function)
+  int divisor = 1 << shift;
   // Bitshift and round element
   int64_t abs = value > 0 ? value : -value;
   int64_t shifted = (abs + (divisor/2)) / divisor;
@@ -290,7 +307,7 @@ output_t systolic_t::rounding_saturating_shift(accum_t value) {
   auto elem_t_max = std::numeric_limits<input_t>::max();
   auto elem_t_min = std::numeric_limits<input_t>::min();
   int64_t elem = shifted > elem_t_max ? elem_t_max : (shifted < elem_t_min ? elem_t_min : shifted);
-  return static_cast<output_t>(elem);
+  return static_cast<input_t>(elem);
 }
 
 std::vector<disasm_insn_t*> rocc_t::get_disasms()
