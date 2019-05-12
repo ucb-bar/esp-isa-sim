@@ -7,7 +7,7 @@
 #include <limits>
 
 typedef int8_t input_t; // Systolic array input datatype (feeding into PEs, moving out of accumulator)
-typedef int8_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
+typedef int16_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
 typedef int32_t accum_t; // Accumulator datatype (inside PEs for OS dataflow and for the external accumulator)
 static const uint32_t dim = 16; // Square dimension of systolic array
 static const uint32_t sp_matrices = 10*1024; // Size the scratchpad to fit sp_matrices matrices
@@ -61,8 +61,9 @@ private:
   const unsigned preload_funct = 6;
 
   bool debug;
-  output_t rounding_saturating_shift(accum_t value);
-  input_t apply_activation(output_t value);
+  output_t out_rounding_saturating_shift(accum_t value, uint64_t shift);
+  input_t in_rounding_saturating_shift(accum_t value, uint64_t shift);
+  input_t apply_activation(input_t value);
 };
 
 #endif
