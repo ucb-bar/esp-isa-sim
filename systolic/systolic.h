@@ -6,12 +6,12 @@
 #include <random>
 #include <limits>
 
-typedef int16_t input_t; // Systolic array input datatype (feeding into PEs, moving out of accumulator)
-typedef int16_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
+typedef int8_t input_t; // Systolic array input datatype (feeding into PEs, moving out of accumulator)
+typedef int8_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
 typedef int32_t accum_t; // Accumulator datatype (inside PEs for OS dataflow and for the external accumulator)
-static const uint32_t dim = 4; // Square dimension of systolic array
-static const uint32_t sp_matrices = 256; // Size the scratchpad to fit sp_matrices matrices
-static const uint32_t accum_rows = 32; // Number of systolic array rows in the accumulator
+static const uint32_t dim = 16; // Square dimension of systolic array
+static const uint32_t sp_matrices = 10*1024; // Size the scratchpad to fit sp_matrices matrices
+static const uint32_t accum_rows = 128; // Number of systolic array rows in the accumulator
 
 struct systolic_state_t
 {
@@ -19,8 +19,9 @@ struct systolic_state_t
   enum Activation {NONE, RELU, RELU6};
   void reset();
 
-  reg_t output_sp_addr;
-  reg_t preload_sp_addr;
+  // 32-bit systolic address space
+  uint32_t output_sp_addr;
+  uint32_t preload_sp_addr;
   Dataflow mode;
   Activation act;
   reg_t shift;
@@ -43,12 +44,9 @@ public:
 
   void mvin(reg_t dram_addr, reg_t sp_addr);
   void mvout(reg_t dram_addr, reg_t sp_addr);
-  void preload(reg_t d_addr, reg_t c_addr);
+  void preload(reg_t bd_addr, reg_t c_addr);
   void setmode(reg_t rs1, reg_t rs2);
-  void compute(reg_t a_addr, reg_t b_addr, bool preload);
-
-  accum_t get_matrix_element(reg_t base_sp_addr, size_t i, size_t j);
-  void store_matrix_element(reg_t base_sp_addr, size_t i, size_t j, accum_t value);
+  void compute(reg_t a_addr, reg_t bd_addr, bool preload);
 
 private:
   systolic_state_t systolic_state;
@@ -64,6 +62,7 @@ private:
 
   bool debug;
   output_t rounding_saturating_shift(accum_t value);
+  input_t apply_activation(output_t value);
 };
 
 #endif
