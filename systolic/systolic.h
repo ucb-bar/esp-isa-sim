@@ -64,6 +64,8 @@ private:
   output_t out_rounding_saturating_shift(accum_t value, uint64_t shift);
   input_t in_rounding_saturating_shift(accum_t value, uint64_t shift);
   input_t apply_activation(input_t value);
+  template <class T>
+  T read_from_dram(reg_t addr);
 };
 
 #endif
