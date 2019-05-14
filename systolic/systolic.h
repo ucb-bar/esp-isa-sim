@@ -61,9 +61,16 @@ private:
   const unsigned preload_funct = 6;
 
   bool debug;
-  output_t out_rounding_saturating_shift(accum_t value, uint64_t shift);
-  input_t in_rounding_saturating_shift(accum_t value, uint64_t shift);
   input_t apply_activation(input_t value);
+
+  template <class T>
+  T rounding_saturating_shift(accum_t value, uint64_t shift);
+
+  template <class T>
+  T read_from_dram(reg_t addr);
+
+  template <class T>
+  void write_to_dram(reg_t addr, T data);
 };
 
 #endif
