@@ -66,6 +66,9 @@ private:
   input_t apply_activation(input_t value);
   template <class T>
   T read_from_dram(reg_t addr);
+
+  template <class T>
+  void write_to_dram(reg_t addr, T data);
 };
 
 #endif

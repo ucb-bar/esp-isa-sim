@@ -49,11 +49,22 @@ T systolic_t::read_from_dram(reg_t addr) {
   return value;
 }
 
+template <class T>
+void systolic_t::write_to_dram(reg_t addr, T data) {
+  for (size_t byte_idx = 0; byte_idx < sizeof(T); ++byte_idx) {
+    p->get_mmu()->store_uint8(addr + byte_idx, (data >> (byte_idx*8)) & 0xFF);
+  }
+}
+
 // Move a systolic block from DRAM at dram_addr (byte addr) to
 // the scratchpad/accumulator at sp_addr (systolic-row addressed)
 void systolic_t::mvin(reg_t dram_addr, reg_t sp_addr) {
   bool const accumulator = (((sp_addr >> 31) & 0x1) == 1);
   auto const base_row_addr = (sp_addr & 0x3FFFFFFF); // Strip accumulator addressing bits [31:30]
+
+  #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+  printf("SYSTOLIC: mvin - block from 0x%08lx to addr 0x%08lx\n", dram_addr, sp_addr);
+  #endif
 
   for (size_t i = 0; i < dim; ++i) {
     auto const dram_row_addr = dram_addr + i*systolic_state.load_stride;
@@ -62,60 +73,57 @@ void systolic_t::mvin(reg_t dram_addr, reg_t sp_addr) {
         auto const dram_byte_addr = dram_row_addr + j*sizeof(accum_t);
         auto value = read_from_dram<accum_t>(dram_byte_addr);
         systolic_state.accumulator->at(base_row_addr + i).at(j) = value;
-      } else { // Scratchpad (mvin input_t)
+        #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+        printf("%d ",systolic_state.accumulator->at(i).at(j));
+        #endif
+      } else {
         auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t);
         auto value = read_from_dram<input_t>(dram_byte_addr);
         systolic_state.spad->at(base_row_addr + i).at(j) = value;
-      }
-    }
-  }
-  #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-  printf("SYSTOLIC: mvin - block from 0x%08lx to addr 0x%08lx\n", dram_addr, sp_addr);
-  for (size_t i = 0; i < dim; ++i) {
-    for (size_t j = 0; j < dim; ++j) {
-      if (accumulator) {
-        printf("%d ",systolic_state.accumulator->at(i).at(j));
-      } else {
+        #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
         printf("%d ",systolic_state.spad->at(i).at(j));
+        #endif
       }
     }
+    #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
     printf("\n");
+    #endif
   }
-  #endif
 }
 
 void systolic_t::mvout(reg_t dram_addr, reg_t sp_addr) {
-  for (size_t row_idx = 0; row_idx < dim; ++row_idx) {
-    for (size_t col_idx = 0; col_idx < dim; ++col_idx) {
-      if (((sp_addr >> 31) & 0x1) == 1) { // Accumulator
-        // Apply shift when moving out of accumulator using WS dataflow
-        auto const acc_row_addr = (sp_addr & 0x3FFFFFFF) + row_idx;
-        accum_t acc_value = systolic_state.accumulator->at(acc_row_addr).at(col_idx);
+  bool const accumulator = (((sp_addr >> 31) & 0x1) == 1);
+  auto const base_row_addr = (sp_addr & 0x3FFFFFFF); // Strip accumulator addressing bits [31:30]
+
+  #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+  printf("SYSTOLIC: mvout - block from 0x%08lx to addr 0x%08lx\n", base_row_addr, dram_addr);
+  #endif
+
+  for (size_t i = 0; i < dim; ++i) {
+    auto const dram_row_addr = dram_addr + i*systolic_state.store_stride;
+    for (size_t j = 0; j < dim; ++j) {
+      if (accumulator) { // Apply shift and activation when moving out of accumulator
+        accum_t acc_value = systolic_state.accumulator->at(base_row_addr + i).at(j);
         input_t shifted = in_rounding_saturating_shift(acc_value, systolic_state.shift);
         input_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
-        auto const dram_byte_addr = dram_addr + row_idx*systolic_state.store_stride + col_idx*sizeof(input_t);
-        for (size_t byte_idx = 0; byte_idx < sizeof(input_t); ++byte_idx) {
-          p->get_mmu()->store_uint8(dram_byte_addr + byte_idx,
-                                    static_cast<uint8_t>((activated >> (byte_idx*8)) & 0xFF));
-        }
+        auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t);
+        write_to_dram<input_t>(dram_byte_addr, activated);
         #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-        printf("SYSTOLIC: mvout - (value,shifted,activated) = (%08d, %08d, %08d) from accumulator addr 0x%08lx to 0x%08lx\n",
-               acc_value, shifted, activated, acc_row_addr, dram_byte_addr);
+        printf("%d ", activated);
         #endif
-      } else { // Scratchpad, copy over directly
-        auto const sp_row_addr = sp_addr + row_idx;
-        auto const dram_byte_addr = dram_addr + row_idx*systolic_state.store_stride + col_idx*sizeof(input_t);
-        for (size_t byte_idx = 0; byte_idx < sizeof(input_t); ++byte_idx) {
-          p->get_mmu()->store_uint8(dram_byte_addr + byte_idx,
-                                    static_cast<uint8_t>((systolic_state.spad->at(sp_row_addr).at(col_idx) >> (byte_idx*8)) & 0xFF));
-        }
+      } else { // Scratchpad, write to DRAM directly
+        auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t);
+        input_t value = systolic_state.spad->at(base_row_addr + i).at(j);
+        write_to_dram<input_t>(dram_byte_addr, value);
         #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-        printf("SYSTOLIC: mvout - value %08d from scratchpad addr 0x%08lx to 0x%08lx\n",
-               systolic_state.spad->at(sp_row_addr).at(col_idx), sp_row_addr, dram_byte_addr);
+        printf("%d ", value);
         #endif
       }
     }
+    #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+    printf("\n");
+    #endif
   }
 }
 
