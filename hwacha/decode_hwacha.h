@@ -41,6 +41,7 @@
 
 #define POP_TABLE (insn.vpop_table())
 #define VSHAMT (insn.vshamt())
+#define VDEPTH (insn.vdepth())
 
 //Shared regs
 #define INSN_VRS1 (insn.vrs1())

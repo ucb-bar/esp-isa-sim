@@ -364,6 +364,7 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
   DEFINE_R1TYPE(vfsqrt_s);
   DEFINE_RTYPE(vfmin_s);
   DEFINE_RTYPE(vfmax_s);
+  DEFINE_R3TYPE(vfvmmadd_s);
   DEFINE_R3TYPE(vfmadd_s);
   DEFINE_R3TYPE(vfmsub_s);
   DEFINE_R3TYPE(vfnmadd_s);
@@ -393,6 +394,7 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
   DEFINE_R1TYPE(vfsqrt_d);
   DEFINE_RTYPE(vfmin_d);
   DEFINE_RTYPE(vfmax_d);
+  DEFINE_R3TYPE(vfvmmadd_d);
   DEFINE_R3TYPE(vfmadd_d);
   DEFINE_R3TYPE(vfmsub_d);
   DEFINE_R3TYPE(vfnmadd_d);

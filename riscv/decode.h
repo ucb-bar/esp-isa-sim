@@ -106,6 +106,7 @@ public:
   uint64_t vpop_table() { return x(50, 8); }
   uint64_t vshamt() { return x(32, 6); }
   uint64_t vrm() { return x(50, 3); }
+  uint64_t vdepth() { return x(57, 3); }
   uint64_t vopc() { return x(7, 5); }
   bool v_is_scalar(){
     bool scalar_opc = 
