@@ -113,9 +113,6 @@ void processor_t::parse_isa_string(const char* str)
   if (supports_extension('Q') && !supports_extension('D'))
     bad_isa_string(str);
 
-  if (supports_extension('Q') && max_xlen < 64)
-    bad_isa_string(str);
-
   max_isa = state.misa;
 }
 
@@ -128,6 +125,9 @@ void state_t::reset(reg_t max_isa)
   tselect = 0;
   for (unsigned int i = 0; i < num_triggers; i++)
     mcontrol[i].type = 2;
+
+  pmpcfg[0] = PMP_R | PMP_W | PMP_X | PMP_NAPOT;
+  pmpaddr[0] = ~reg_t(0);
 }
 
 void processor_t::set_debug(bool value)
@@ -143,7 +143,7 @@ void processor_t::set_histogram(bool value)
 #ifndef RISCV_ENABLE_HISTOGRAM
   if (value) {
     fprintf(stderr, "PC Histogram support has not been properly enabled;");
-    fprintf(stderr, " please re-build the riscv-isa-run project using \"configure --enable-histogram\".\n");
+    fprintf(stderr, " please re-build the riscv-isa-sim project using \"configure --enable-histogram\".\n");
   }
 #endif
 }
@@ -188,15 +188,19 @@ void processor_t::take_interrupt(reg_t pending_interrupts)
     // nonstandard interrupts have highest priority
     if (enabled_interrupts >> IRQ_M_EXT)
       enabled_interrupts = enabled_interrupts >> IRQ_M_EXT << IRQ_M_EXT;
-    // external interrupts have next-highest priority
-    else if (enabled_interrupts & (MIP_MEIP | MIP_SEIP))
-      enabled_interrupts = enabled_interrupts & (MIP_MEIP | MIP_SEIP);
-    // software interrupts have next-highest priority
-    else if (enabled_interrupts & (MIP_MSIP | MIP_SSIP))
-      enabled_interrupts = enabled_interrupts & (MIP_MSIP | MIP_SSIP);
-    // timer interrupts have next-highest priority
-    else if (enabled_interrupts & (MIP_MTIP | MIP_STIP))
-      enabled_interrupts = enabled_interrupts & (MIP_MTIP | MIP_STIP);
+    // standard interrupt priority is MEI, MSI, MTI, SEI, SSI, STI
+    else if (enabled_interrupts & MIP_MEIP)
+      enabled_interrupts = MIP_MEIP;
+    else if (enabled_interrupts & MIP_MSIP)
+      enabled_interrupts = MIP_MSIP;
+    else if (enabled_interrupts & MIP_MTIP)
+      enabled_interrupts = MIP_MTIP;
+    else if (enabled_interrupts & MIP_SEIP)
+      enabled_interrupts = MIP_SEIP;
+    else if (enabled_interrupts & MIP_SSIP)
+      enabled_interrupts = MIP_SSIP;
+    else if (enabled_interrupts & MIP_STIP)
+      enabled_interrupts = MIP_STIP;
     else
       abort();
 
@@ -333,6 +337,29 @@ void processor_t::set_csr(int which, reg_t val)
   reg_t delegable_ints = MIP_SSIP | MIP_STIP | MIP_SEIP
                        | ((ext != NULL) << IRQ_COP);
   reg_t all_ints = delegable_ints | MIP_MSIP | MIP_MTIP;
+
+  if (which >= CSR_PMPADDR0 && which < CSR_PMPADDR0 + state.n_pmp) {
+    size_t i = which - CSR_PMPADDR0;
+    bool locked = state.pmpcfg[i] & PMP_L;
+    bool next_locked = i+1 < state.n_pmp && (state.pmpcfg[i+1] & PMP_L);
+    bool next_tor = i+1 < state.n_pmp && (state.pmpcfg[i+1] & PMP_A) == PMP_TOR;
+    if (!locked && !(next_locked && next_tor))
+      state.pmpaddr[i] = val;
+
+    mmu->flush_tlb();
+  }
+
+  if (which >= CSR_PMPCFG0 && which < CSR_PMPCFG0 + state.n_pmp / 4) {
+    for (size_t i0 = (which - CSR_PMPCFG0) * 4, i = i0; i < i0 + xlen / 8; i++) {
+      if (!(state.pmpcfg[i] & PMP_L)) {
+        uint8_t cfg = (val >> (8 * (i - i0))) & (PMP_R | PMP_W | PMP_X | PMP_A | PMP_L);
+        cfg &= ~PMP_W | ((cfg & PMP_R) ? PMP_W : 0); // Disallow R=0 W=1
+        state.pmpcfg[i] = cfg;
+      }
+    }
+    mmu->flush_tlb();
+  }
+
   switch (which)
   {
     case CSR_FFLAGS:
@@ -534,6 +561,9 @@ void processor_t::set_csr(int which, reg_t val)
   }
 }
 
+// Note that get_csr is sometimes called when read side-effects should not
+// be actioned.  In other words, Spike cannot currently support CSRs with
+// side effects on reads.
 reg_t processor_t::get_csr(int which)
 {
   uint32_t ctr_en = -1;
@@ -555,6 +585,18 @@ reg_t processor_t::get_csr(int which)
     return 0;
   if (which >= CSR_MHPMEVENT3 && which <= CSR_MHPMEVENT31)
     return 0;
+
+  if (which >= CSR_PMPADDR0 && which < CSR_PMPADDR0 + state.n_pmp)
+    return state.pmpaddr[which - CSR_PMPADDR0];
+
+  if (which >= CSR_PMPCFG0 && which < CSR_PMPCFG0 + state.n_pmp / 4) {
+    require((which & ((xlen / 32) - 1)) == 0);
+
+    reg_t res = 0;
+    for (size_t i0 = (which - CSR_PMPCFG0) * 4, i = i0; i < i0 + xlen / 8 && i < state.n_pmp; i++)
+      res |= reg_t(state.pmpcfg[i]) << (8 * (i - i0));
+    return res;
+  }
 
   switch (which)
   {
@@ -624,7 +666,7 @@ reg_t processor_t::get_csr(int which)
     case CSR_MCAUSE: return state.mcause;
     case CSR_MTVAL: return state.mtval;
     case CSR_MISA: return state.misa;
-    case CSR_MARCHID: return 0;
+    case CSR_MARCHID: return 5;
     case CSR_MIMPID: return 0;
     case CSR_MVENDORID: return 0;
     case CSR_MHARTID: return id;
