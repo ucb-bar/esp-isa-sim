@@ -9,8 +9,21 @@
 class sim_t;
 
 typedef struct {
+    // Size of program_buffer in 32-bit words, as exposed to the rest of the
+    // world.
+    unsigned progbufsize;
+    unsigned max_bus_master_bits;
+    bool require_authentication;
+    unsigned abstract_rti;
+    bool support_hasel;
+    bool support_abstract_csr_access;
+    bool support_haltgroups;
+} debug_module_config_t;
+
+typedef struct {
   bool haltreq;
   bool resumereq;
+  bool hasel;
   unsigned hartsel;
   bool hartreset;
   bool dmactive;
@@ -92,9 +105,7 @@ class debug_module_t : public abstract_device_t
      * abstract_rti is extra run-test/idle cycles that each abstract command
      * takes to execute. Useful for testing OpenOCD.
      */
-    debug_module_t(sim_t *sim, unsigned progbufsize,
-        unsigned max_bus_master_bits, bool require_authentication,
-        unsigned abstract_rti);
+    debug_module_t(sim_t *sim, const debug_module_config_t &config);
     ~debug_module_t();
 
     void add_device(bus_t *bus);
@@ -117,19 +128,14 @@ class debug_module_t : public abstract_device_t
   private:
     static const unsigned datasize = 2;
     unsigned nprocs;
-    // Size of program_buffer in 32-bit words, as exposed to the rest of the
-    // world.
-    unsigned progbufsize;
+    debug_module_config_t config;
     // Actual size of the program buffer, which is 1 word bigger than we let on
     // to implement the implicit ebreak at the end.
     unsigned program_buffer_bytes;
-    unsigned max_bus_master_bits;
-    bool require_authentication;
-    unsigned abstract_rti;
     static const unsigned debug_data_start = 0x380;
     unsigned debug_progbuf_start;
 
-    static const unsigned debug_abstract_size = 5;
+    static const unsigned debug_abstract_size = 12;
     unsigned debug_abstract_start;
     // R/W this through custom registers, to allow debuggers to test that
     // functionality.
@@ -162,6 +168,8 @@ class debug_module_t : public abstract_device_t
     abstractcs_t abstractcs;
     abstractauto_t abstractauto;
     uint32_t command;
+    uint16_t hawindowsel;
+    std::vector<bool> hart_array_mask;
 
     sbcs_t sbcs;
     uint32_t sbaddress[4];
@@ -170,7 +178,8 @@ class debug_module_t : public abstract_device_t
     uint32_t challenge;
     const uint32_t secret = 1;
 
-    processor_t *current_proc() const;
+    processor_t *processor(unsigned hartid) const;
+    bool hart_selected(unsigned hartid) const;
     void reset();
     bool perform_abstract_command();
 

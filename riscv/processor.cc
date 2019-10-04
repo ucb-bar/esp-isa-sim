@@ -14,19 +14,21 @@
 #include <assert.h>
 #include <limits.h>
 #include <stdexcept>
+#include <string>
 #include <algorithm>
 
 #undef STATE
 #define STATE state
 
-processor_t::processor_t(const char* isa, simif_t* sim, uint32_t id,
-        bool halt_on_reset)
+processor_t::processor_t(const char* isa, const char* varch, simif_t* sim,
+                         uint32_t id, bool halt_on_reset)
   : debug(false), halt_request(false), sim(sim), ext(NULL), id(id),
   halt_on_reset(halt_on_reset), last_pc(1), executions(1)
 {
+  VU.p = this;
   parse_isa_string(isa);
+  parse_varch_string(varch);
   register_base_instructions();
-
   mmu = new mmu_t(sim, this);
 
   disassembler = new disassembler_t(max_xlen);
@@ -58,6 +60,66 @@ static void bad_isa_string(const char* isa)
   abort();
 }
 
+static void bad_varch_string(const char* varch)
+{
+  fprintf(stderr, "error: bad --varch option %s\n", varch);
+  abort();
+}
+
+static int parse_varch(std::string &str){
+  int val = 0;
+  if(!str.empty()){
+    std::string sval = str.substr(1);
+    val = std::stoi(sval);
+    if ((val & (val - 1)) != 0) // val should be power of 2
+      bad_varch_string(str.c_str());
+  }else{
+    bad_varch_string(str.c_str());
+  }
+  return val;
+}
+
+void processor_t::parse_varch_string(const char* s)
+{
+  std::string str, tmp;
+  for (const char *r = s; *r; r++)
+    str += std::tolower(*r);
+
+  std::string delimiter = ":";
+
+  size_t pos = 0;
+  int vlen = 0;
+  int elen = 0;
+  int slen = 0;
+  std::string token;
+  while (!str.empty() && token != str) {
+    pos = str.find(delimiter);
+    if (pos == std::string::npos){
+      token = str;
+    }else{
+      token = str.substr(0, pos);
+    }
+    if (token[0] == 'v'){
+      vlen = parse_varch(token);
+    }else if (token[0] == 'e'){
+      elen = parse_varch(token);
+    }else if (token[0] == 's'){
+      slen = parse_varch(token);
+    }else{
+      bad_varch_string(str.c_str());
+    }
+    str.erase(0, pos + delimiter.length());
+  }
+
+  if (!(vlen >= 32 || vlen <= 4096) && !(slen >= vlen || slen <= vlen) && !(elen >= slen || elen <= slen)){
+    bad_varch_string(s);
+  }
+
+  VU.VLEN = vlen;
+  VU.ELEN = elen;
+  VU.SLEN = slen;
+}
+
 void processor_t::parse_isa_string(const char* str)
 {
   std::string lowercase, tmp;
@@ -65,7 +127,11 @@ void processor_t::parse_isa_string(const char* str)
     lowercase += std::tolower(*r);
 
   const char* p = lowercase.c_str();
-  const char* all_subsets = "imafdqc";
+  const char* all_subsets = "imafdqc"
+#ifdef __SIZEOF_INT128__
+    "v"
+#endif
+    "";
 
   max_xlen = 64;
   state.misa = reg_t(2) << 62;
@@ -130,6 +196,37 @@ void state_t::reset(reg_t max_isa)
   pmpaddr[0] = ~reg_t(0);
 }
 
+void vectorUnit_t::reset(){
+  free(reg_file);
+  VLEN = get_vlen();
+  ELEN = get_elen();
+  SLEN = get_slen(); // registers are simply concatenated
+  reg_file = malloc(NVPR * (VLEN/8));
+
+  vtype = 0;
+  set_vl(-1, 0, -1); // default to illegal configuration
+}
+
+reg_t vectorUnit_t::set_vl(uint64_t regId, reg_t reqVL, reg_t newType){
+  if (vtype != newType){
+    vtype = newType;
+    vsew = 1 << (BITS(newType, 4, 2) + 3);
+    vlmul = 1 << BITS(newType, 1, 0);
+    vediv = 1 << BITS(newType, 6, 5);
+    vlmax = VLEN/vsew * vlmul;
+    vmlen = vsew / vlmul;
+    reg_mask = (NVPR-1) & ~(vlmul-1);
+
+    vill = vsew > e64 || vediv != 1 || (newType >> 7) != 0;
+    if (vill)
+      vlmax = 0;
+  }
+  vl = reqVL <= vlmax && regId != 0 ? reqVL : vlmax;
+  vstart = 0;
+  setvl_count++;
+  return vl;
+}
+
 void processor_t::set_debug(bool value)
 {
   debug = value;
@@ -144,6 +241,19 @@ void processor_t::set_histogram(bool value)
   if (value) {
     fprintf(stderr, "PC Histogram support has not been properly enabled;");
     fprintf(stderr, " please re-build the riscv-isa-sim project using \"configure --enable-histogram\".\n");
+    abort();
+  }
+#endif
+}
+
+void processor_t::set_log_commits(bool value)
+{
+  log_commits_enabled = value;
+#ifndef RISCV_ENABLE_COMMITLOG
+  if (value) {
+    fprintf(stderr, "Commit logging support has not been properly enabled;");
+    fprintf(stderr, " please re-build the riscv-isa-sim project using \"configure --enable-commitlog\".\n");
+    abort();
   }
 #endif
 }
@@ -154,6 +264,7 @@ void processor_t::reset()
   state.dcsr.halt = halt_on_reset;
   halt_on_reset = false;
   set_csr(CSR_MSTATUS, state.mstatus);
+  VU.reset();
 
   if (ext)
     ext->reset(); // reset the extension
@@ -184,7 +295,7 @@ void processor_t::take_interrupt(reg_t pending_interrupts)
   if (enabled_interrupts == 0)
     enabled_interrupts = pending_interrupts & state.mideleg & -s_enabled;
 
-  if (state.dcsr.cause == 0 && enabled_interrupts) {
+  if (!state.debug_mode && enabled_interrupts) {
     // nonstandard interrupts have highest priority
     if (enabled_interrupts >> IRQ_M_EXT)
       enabled_interrupts = enabled_interrupts >> IRQ_M_EXT << IRQ_M_EXT;
@@ -238,6 +349,7 @@ void processor_t::set_privilege(reg_t prv)
 
 void processor_t::enter_debug_mode(uint8_t cause)
 {
+  state.debug_mode = true;
   state.dcsr.cause = cause;
   state.dcsr.prv = state.prv;
   set_privilege(PRV_M);
@@ -255,7 +367,7 @@ void processor_t::take_trap(trap_t& t, reg_t epc)
           t.get_tval());
   }
 
-  if (state.dcsr.cause) {
+  if (state.debug_mode) {
     if (t.cause() == CAUSE_BREAKPOINT) {
       state.pc = DEBUG_ROM_ENTRY;
     } else {
@@ -280,7 +392,8 @@ void processor_t::take_trap(trap_t& t, reg_t epc)
     deleg = state.mideleg, bit &= ~((reg_t)1 << (max_xlen-1));
   if (state.prv <= PRV_S && bit < max_xlen && ((deleg >> bit) & 1)) {
     // handle the trap in S-mode
-    state.pc = state.stvec;
+    reg_t vector = (state.stvec & 1) && interrupt ? 4*bit : 0;
+    state.pc = (state.stvec & ~(reg_t)1) + vector;
     state.scause = t.cause();
     state.sepc = epc;
     state.stval = t.get_tval();
@@ -401,7 +514,6 @@ void processor_t::set_csr(int which, reg_t val)
         state.mstatus = set_field(state.mstatus, MSTATUS64_SD, dirty);
 
       state.mstatus = set_field(state.mstatus, MSTATUS_UXL, xlen_to_uxl(max_xlen));
-      state.mstatus = set_field(state.mstatus, MSTATUS_UXL, xlen_to_uxl(max_xlen));
       state.mstatus = set_field(state.mstatus, MSTATUS_SXL, xlen_to_uxl(max_xlen));
       // U-XLEN == S-XLEN == M-XLEN
       xlen = max_xlen;
@@ -475,7 +587,7 @@ void processor_t::set_csr(int which, reg_t val)
       break;
     }
     case CSR_SEPC: state.sepc = val & ~(reg_t)1; break;
-    case CSR_STVEC: state.stvec = val >> 2 << 2; break;
+    case CSR_STVEC: state.stvec = val & ~(reg_t)2; break;
     case CSR_SSCRATCH: state.sscratch = val; break;
     case CSR_SCAUSE: state.scause = val; break;
     case CSR_STVAL: state.stval = val; break;
@@ -512,7 +624,7 @@ void processor_t::set_csr(int which, reg_t val)
     case CSR_TDATA1:
       {
         mcontrol_t *mc = &state.mcontrol[state.tselect];
-        if (mc->dmode && !state.dcsr.cause) {
+        if (mc->dmode && !state.debug_mode) {
           break;
         }
         mc->dmode = get_field(val, MCONTROL_DMODE(xlen));
@@ -535,7 +647,7 @@ void processor_t::set_csr(int which, reg_t val)
       }
       break;
     case CSR_TDATA2:
-      if (state.mcontrol[state.tselect].dmode && !state.dcsr.cause) {
+      if (state.mcontrol[state.tselect].dmode && !state.debug_mode) {
         break;
       }
       if (state.tselect < state.num_triggers) {
@@ -556,7 +668,19 @@ void processor_t::set_csr(int which, reg_t val)
       state.dpc = val & ~(reg_t)1;
       break;
     case CSR_DSCRATCH:
-      state.dscratch = val;
+      state.dscratch0 = val;
+      break;
+    case CSR_DSCRATCH + 1:
+      state.dscratch1 = val;
+      break;
+    case CSR_VSTART:
+      VU.vstart = val;
+      break;
+    case CSR_VXSAT:
+      VU.vxsat = val;
+      break;
+    case CSR_VXRM:
+      VU.vxrm = val;
       break;
   }
 }
@@ -724,7 +848,34 @@ reg_t processor_t::get_csr(int which)
     case CSR_DPC:
       return state.dpc & pc_alignment_mask();
     case CSR_DSCRATCH:
-      return state.dscratch;
+      return state.dscratch0;
+    case CSR_DSCRATCH + 1:
+      return state.dscratch1;
+    case CSR_VSTART:
+      require_vector_vs;
+      if (!supports_extension('V'))
+        break;
+      return VU.vstart;
+    case CSR_VXSAT:
+      require_vector_vs;
+      if (!supports_extension('V'))
+        break;
+      return VU.vxsat;
+    case CSR_VXRM:
+      require_vector_vs;
+      if (!supports_extension('V'))
+        break;
+      return VU.vxrm;
+    case CSR_VL:
+      require_vector_vs;
+      if (!supports_extension('V'))
+        break;
+      return VU.vl;
+    case CSR_VTYPE:
+      require_vector_vs;
+      if (!supports_extension('V'))
+        break;
+      return VU.vtype;
   }
   throw trap_illegal_instruction(0);
 }

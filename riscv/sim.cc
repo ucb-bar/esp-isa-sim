@@ -24,21 +24,24 @@ static void handle_signal(int sig)
   signal(sig, &handle_signal);
 }
 
-sim_t::sim_t(const char* isa, size_t nprocs, bool halted, reg_t start_pc,
-             std::vector<std::pair<reg_t, mem_t*>> mems,
+sim_t::sim_t(const char* isa, const char* varch, size_t nprocs, bool halted,
+             reg_t start_pc, std::vector<std::pair<reg_t, mem_t*>> mems,
+             std::vector<std::pair<reg_t, abstract_device_t*>> plugin_devices,
              const std::vector<std::string>& args,
-             std::vector<int> const hartids, unsigned progsize,
-             unsigned max_bus_master_bits, bool require_authentication,
-             suseconds_t abstract_delay_usec)
-  : htif_t(args), mems(mems), procs(std::max(nprocs, size_t(1))),
-    start_pc(start_pc), current_step(0), current_proc(0), debug(false),
-    histogram_enabled(false), dtb_enabled(true), remote_bitbang(NULL),
-    debug_module(this, progsize, max_bus_master_bits, require_authentication,
-        abstract_delay_usec)
+             std::vector<int> const hartids,
+             const debug_module_config_t &dm_config)
+  : htif_t(args), mems(mems), plugin_devices(plugin_devices),
+    procs(std::max(nprocs, size_t(1))), start_pc(start_pc), current_step(0),
+    current_proc(0), debug(false), histogram_enabled(false),
+    log_commits_enabled(false), dtb_enabled(true),
+    remote_bitbang(NULL), debug_module(this, dm_config)
 {
   signal(SIGINT, &handle_signal);
 
   for (auto& x : mems)
+    bus.add_device(x.first, x.second);
+
+  for (auto& x : plugin_devices)
     bus.add_device(x.first, x.second);
 
   debug_module.add_device(&bus);
@@ -47,7 +50,7 @@ sim_t::sim_t(const char* isa, size_t nprocs, bool halted, reg_t start_pc,
 
   if (hartids.size() == 0) {
     for (size_t i = 0; i < procs.size(); i++) {
-      procs[i] = new processor_t(isa, this, i, halted);
+      procs[i] = new processor_t(isa, varch, this, i, halted);
     }
   }
   else {
@@ -56,7 +59,7 @@ sim_t::sim_t(const char* isa, size_t nprocs, bool halted, reg_t start_pc,
       exit(1);
     }
     for (size_t i = 0; i < procs.size(); i++) {
-      procs[i] = new processor_t(isa, this, hartids[i], halted);
+      procs[i] = new processor_t(isa, varch, this, hartids[i], halted);
     }
   }
 
@@ -137,6 +140,14 @@ void sim_t::set_histogram(bool value)
   histogram_enabled = value;
   for (size_t i = 0; i < procs.size(); i++) {
     procs[i]->set_histogram(histogram_enabled);
+  }
+}
+
+void sim_t::set_log_commits(bool value)
+{
+  log_commits_enabled = value;
+  for (size_t i = 0; i < procs.size(); i++) {
+    procs[i]->set_log_commits(log_commits_enabled);
   }
 }
 
