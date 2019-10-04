@@ -695,3 +695,5 @@ $(riscv_gen_srcs): %.cc: insns/%.h insn_template.cc
 
 riscv_junk = \
 	$(riscv_gen_srcs) \
+
+riscv_CFLAGS = -fPIC

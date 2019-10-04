@@ -8,6 +8,7 @@
 
 #undef RS1
 #undef RS2
+#undef RS3
 #undef WRITE_RD
 
 //Do we need this duplication or could we just call read/write_xpr
