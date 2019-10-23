@@ -3,7 +3,7 @@ if(!ENABLED)
 
 if (VL) {
   if (!h->vf_active()) {
-    WRITE_VRM(STATE.frm);
+    WRITE_VFRM(STATE.frm);
     WRITE_VF_PC(XS1 + insn.s_imm());
     for (uint32_t i=0; i<VL; i++)
       h->get_ut_state(i)->run = true;
