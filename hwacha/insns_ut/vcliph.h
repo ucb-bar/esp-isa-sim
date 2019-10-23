@@ -1,26 +1,14 @@
 {
-int16_t round_res = sext_xlen(sext_xlen(RS1 + (1 << 15)) >> (RS2 & (xlen-1)));
-switch (VXRM)
-{
-    case 0:
-        round_res = sext_xlen(sext_xlen(RS1 + (1 << 15)) >> (RS2 & (xlen-1)));
-        break;
-    case 1:
-        if (RS1 & (1 << 15)) {
-          round_res = sext_xlen(sext_xlen(RS1 + (1 << 15)) >> (RS2 & (xlen-1)));
-        } else {
-          round_res = sext_xlen(sext_xlen(RS1) >> (RS2 & (xlen-1)));
-        }
-        break;
-    case 2:
-        round_res = sext_xlen(sext_xlen(RS1) >> (RS2 & (xlen-1)));
-        break;
-    case 3:
-        round_res = sext_xlen(sext_xlen(RS1 | ((RS1 & ((1<<15)-1)) > 0)) >> (RS2 & (xlen-1)));
-        break;
-    default:
-        round_res = sext_xlen(sext_xlen(RS1 + (1 << 15)) >> (RS2 & (xlen-1)));
-}
-WRITE_RD(round_res);
-if (round_res < sreg_t(RS1)) { WRITE_VXSAT(1); }
+    unsigned int shift = RS2 & (xlen - 1);
+    sreg_t result = round_vxrm(RS1, VXRM, shift);
+    result = sext_xlen(result) >> shift;
+    // Saturation
+    if (result < INT16_MIN) {
+        result = INT16_MIN;
+        WRITE_VXSAT(1);
+    } else if (result > INT16_MAX) {
+        result = INT16_MAX;
+        WRITE_VXSAT(1);
+    }
+    WRITE_RD(result);
 }

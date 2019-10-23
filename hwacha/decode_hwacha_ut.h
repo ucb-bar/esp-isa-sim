@@ -182,4 +182,24 @@ static inline freg_t fregs(float128_t f)
   }
 #endif
 
+static inline sreg_t round_vxrm(sreg_t result, uint64_t vxrm, unsigned int shift)
+{
+  const reg_t lsb = 1UL << shift;
+  const reg_t lsb_half = lsb >> 1;
+
+  switch (vxrm) {
+  case 0: /* RNU */
+    return result + lsb_half;
+  case 1: /* RNE */
+    if ((result & lsb_half) && ((result & (lsb_half - 1)) || (result & lsb)))
+      return result + lsb_half;
+    break;
+  case 3: /* ROD */
+    if (result & (lsb - 1))
+      return result | lsb;
+    break;
+  }
+  return result; /* RDN */
+}
+
 #endif
