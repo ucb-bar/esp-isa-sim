@@ -1,5 +1,5 @@
 require_fp;
-softfloat_roundingMode = VRM;
+softfloat_roundingMode = VFRM;
 size_t depth = VDEPTH + 1;
 reg_t res = FRS3;
 for(size_t d = 0; d < depth; d++) {

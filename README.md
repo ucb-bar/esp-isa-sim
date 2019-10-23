@@ -1,30 +1,70 @@
-RISC-V ISA Simulator
-======================
-
-Author  : Andrew Waterman, Yunsup Lee
-
-Date    : June 19, 2011
-
-Version : (under version control)
+Spike RISC-V ISA Simulator
+============================
 
 About
 -------------
 
-The RISC-V ISA Simulator implements a functional model of one or more
-RISC-V processors.
+Spike, the RISC-V ISA Simulator, implements a functional model of one or more
+RISC-V harts.  It is named after the golden spike used to celebrate the
+completion of the US transcontinental railway.
+
+Spike supports the following RISC-V ISA features:
+  - RV32I and RV64I base ISAs, v2.1
+  - Zifencei extension, v2.0
+  - Zicsr extension, v2.0
+  - M extension, v2.0
+  - A extension, v2.0
+  - F extension, v2.2
+  - D extension, v2.2
+  - Q extension, v2.2
+  - C extension, v2.0
+  - V extension, v0.7.1 (_requires a 64-bit host_)
+  - Conformance to both RVWMO and RVTSO (Spike is sequentially consistent)
+  - Machine, Supervisor, and User modes, v1.11
+  - Debug v0.14
+
+Versioning and APIs
+-------------------
+
+Projects are versioned primarily to indicate when the API has been extended or
+rendered incompatible.  In that spirit, Spike aims to follow the
+[SemVer](https://semver.org/spec/v2.0.0.html) versioning scheme, in which
+major version numbers are incremented when backwards-incompatible API changes
+are made; minor version numbers are incremented when new APIs are added; and
+patch version numbers are incremented when bugs are fixed in
+a backwards-compatible manner.
+
+Spike's principal public API is the RISC-V ISA.  _The C++ interface to Spike's
+internals is **not** considered a public API at this time_, and
+backwards-incompatible changes to this interface _will_ be made without
+incrementing the major version number.
 
 Build Steps
 ---------------
 
 We assume that the RISCV environment variable is set to the RISC-V tools
-install path, and that the riscv-fesvr package is installed there.
+install path.
 
     $ apt-get install device-tree-compiler
     $ mkdir build
     $ cd build
-    $ ../configure --prefix=$RISCV --with-fesvr=$RISCV
+    $ ../configure --prefix=$RISCV
     $ make
     $ [sudo] make install
+
+Build Steps on OpenBSD
+----------------------
+
+Install bash, gmake, dtc, and use clang.
+
+    $ pkg_add bash gmake dtc
+    $ exec bash
+    $ export CC=cc; export CXX=c++
+    $ mkdir build
+    $ cd build
+    $ ../configure --prefix=$RISCV
+    $ gmake
+    $ [doas] make install
 
 Compiling and Running a Simple C Program
 -------------------------------------------
@@ -51,10 +91,11 @@ Adding an instruction to the simulator requires two steps:
 
   2.  Add the opcode and opcode mask to riscv/opcodes.h.  Alternatively,
       add it to the riscv-opcodes package, and it will do so for you:
-
+        ```
          $ cd ../riscv-opcodes
          $ vi opcodes       // add a line for the new instruction
          $ make install
+        ```
 
   3.  Rebuild the simulator.
 
@@ -87,7 +128,7 @@ To see the contents of memory with a virtual address (0 for core 0):
 
     : mem 0 2020
 
-You can advance by one instruction by pressing <enter>. You can also
+You can advance by one instruction by pressing the enter key. You can also
 execute until a desired equality is reached:
 
     : until pc 0 2020                   (stop when pc=2020)
@@ -139,6 +180,7 @@ int main()
         i++;
     }
 
+done:
     while (!wait)
         ;
 }
@@ -187,8 +229,8 @@ riscv.cpu: target state: halted
 In yet another shell, start your gdb debug session:
 ```
 tnewsome@compy-vm:~/SiFive/spike-test$ riscv64-unknown-elf-gdb rot13-64
-GNU gdb (GDB) 7.12.50.20170505-git
-Copyright (C) 2016 Free Software Foundation, Inc.
+GNU gdb (GDB) 8.0.50.20170724-git
+Copyright (C) 2017 Free Software Foundation, Inc.
 License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
 This is free software: you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
@@ -204,21 +246,22 @@ Type "apropos word" to search for commands related to "word"...
 Reading symbols from rot13-64...done.
 (gdb) target remote localhost:3333
 Remote debugging using localhost:3333
-0x000000001001000a in main () at rot13.c:8
-8           while (wait)
+0x0000000010010004 in main () at rot13.c:8
+8	    while (wait)
 (gdb) print wait
 $1 = 1
 (gdb) print wait=0
 $2 = 0
 (gdb) print text
 $3 = "Vafgehpgvba frgf jnag gb or serr!"
-(gdb) b 23
-Breakpoint 1 at 0x10010064: file rot13.c, line 23.
+(gdb) b done 
+Breakpoint 1 at 0x10010064: file rot13.c, line 22.
 (gdb) c
 Continuing.
+Disabling abstract command writes to CSRs.
 
 Breakpoint 1, main () at rot13.c:23
-23          while (!wait)
+23	    while (!wait)
 (gdb) print wait
 $4 = 0
 (gdb) print text

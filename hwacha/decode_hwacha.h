@@ -28,13 +28,13 @@
 #define WRITE_UTRED(value) (h->get_ct_state()->reduction = (value))
 #define WRITE_VF_PC(pcnext) (h->get_ct_state()->vf_pc = (pcnext))
 #define WRITE_PREC(precision) (h->get_ct_state()->prec = (precision))
-#define WRITE_VRM(rm) (h->get_ct_state()->frm = (rm))
+#define WRITE_VFRM(rm) (h->get_ct_state()->frm = (rm))
 #define WRITE_VXRM(vxrmnext) (h->get_ct_state()->vxrm = (vxrmnext))
 #define WRITE_VXSAT(vxsatnext) (h->get_ct_state()->vxsat = (vxsatnext))
 #define VXRM (h->get_ct_state()->vxrm)
 #define VXSAT (h->get_ct_state()->vxsat)
 
-#define VRM ({ int rm = insn.vrm(); \
+#define VFRM ({ int rm = insn.vrm(); \
               if(rm == 7) rm = h->get_ct_state()->frm; \
               if(rm > 4) throw trap_illegal_instruction(0); \
               rm; })

@@ -45,3 +45,7 @@ hwacha_junk = \
 	$(hwacha_ut_gen_srcs) \
 	insn_template_hwacha.h.gch \
 	insn_template_hwacha_ut.h.gch \
+
+hwacha_CFLAGS = -fPIC
+
+hwacha_install_shared_lib = yes

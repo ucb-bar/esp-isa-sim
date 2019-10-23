@@ -47,7 +47,7 @@ std::string make_dts(size_t insns_per_rtc_tick, size_t cpu_hz,
          "  memory@" << m.first << " {\n"
          "    device_type = \"memory\";\n"
          "    reg = <0x" << (m.first >> 32) << " 0x" << (m.first & (uint32_t)-1) <<
-                   " 0x" << (m.second->size() >> 32) << " 0x" << (m.second->size() & (uint32_t)-1) << ">;\n"
+                   " 0x" << (m.second->size() >> 16 >> 16) << " 0x" << (m.second->size() & (uint32_t)-1) << ">;\n"
          "  };\n";
   }
   s <<   "  soc {\n"
@@ -80,6 +80,7 @@ std::string dts_compile(const std::string& dts)
   int dts_pipe[2];
   pid_t dts_pid;
 
+  fflush(NULL); // flush stdout/stderr before forking
   if (pipe(dts_pipe) != 0 || (dts_pid = fork()) < 0) {
     std::cerr << "Failed to fork dts child: " << strerror(errno) << std::endl;
     exit(1);

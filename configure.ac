@@ -43,6 +43,8 @@ AC_CONFIG_AUX_DIR([scripts])
 AC_CANONICAL_BUILD
 AC_CANONICAL_HOST
 
+m4_include(ax_check_link_flag.m4)
+
 #-------------------------------------------------------------------------
 # Checks for programs
 #-------------------------------------------------------------------------
@@ -73,11 +75,18 @@ MCPPBS_PROG_INSTALL
 AC_HEADER_STDC
 
 #-------------------------------------------------------------------------
+# Checks for type
+#-------------------------------------------------------------------------
+
+AC_CHECK_TYPE([__int128_t], AC_SUBST([HAVE_INT128],[yes]))
+
+#-------------------------------------------------------------------------
 # Default compiler flags
 #-------------------------------------------------------------------------
 
 AC_SUBST([CFLAGS],  ["-Wall -Wno-unused -g -O2"])
 AC_SUBST([CXXFLAGS],["-Wall -Wno-unused -g -O2 -std=c++11"])
+AX_CHECK_LINK_FLAG([-Wl,--export-dynamic], [LDFLAGS="-Wl,--export-dynamic"])
 
 #-------------------------------------------------------------------------
 # MCPPBS subproject list
@@ -86,7 +95,7 @@ AC_SUBST([CXXFLAGS],["-Wall -Wno-unused -g -O2 -std=c++11"])
 # The '*' suffix indicates an optional subproject. The '**' suffix
 # indicates an optional subproject which is also the name of a group.
 
-MCPPBS_SUBPROJECTS([ riscv, hwacha, dummy_rocc, softfloat, spike_main ])
+MCPPBS_SUBPROJECTS([ fesvr, riscv, hwacha, dummy_rocc, softfloat, spike_main ])
 
 #-------------------------------------------------------------------------
 # MCPPBS subproject groups
@@ -107,6 +116,7 @@ AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([riscv-spike.pc])
 AC_CONFIG_FILES([riscv-riscv.pc])
+AC_CONFIG_FILES([riscv-fesvr.pc])
 AC_CONFIG_FILES([riscv-softfloat.pc])
 AC_CONFIG_FILES([riscv-hwacha.pc])
 AC_CONFIG_FILES([riscv-dummy_rocc.pc])

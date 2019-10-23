@@ -112,6 +112,16 @@ public:
   load_func(int32)
   load_func(int64)
 
+#ifndef RISCV_ENABLE_COMMITLOG
+# define WRITE_MEM(addr, value, size) ({})
+#else
+# define WRITE_MEM(addr, val, size) ({ \
+    proc->state.log_mem_write.addr = addr; \
+    proc->state.log_mem_write.value = val; \
+    proc->state.log_mem_write.size = size; \
+  })
+#endif
+
   // template for functions that store an aligned value to memory
   #define store_func(type) \
     void store_##type(reg_t addr, type##_t val) { \
@@ -130,7 +140,11 @@ public:
       } \
       else \
         store_slow_path(addr, sizeof(type##_t), (const uint8_t*)&val); \
-    }
+      if (proc) { \
+        size_t size = sizeof(type##_t); \
+        WRITE_MEM(addr, val, size); \
+      } \
+  }
 
   // template for functions that perform an atomic memory operation
   #define amo_func(type) \
@@ -187,7 +201,7 @@ public:
 
   inline void acquire_load_reservation(reg_t vaddr)
   {
-    reg_t paddr = translate(vaddr, LOAD);
+    reg_t paddr = translate(vaddr, 1, LOAD);
     if (auto host_addr = sim->addr_to_mem(paddr))
       load_reservation_address = refill_tlb(vaddr, paddr, host_addr, LOAD).target_offset + vaddr;
     else
@@ -196,7 +210,7 @@ public:
 
   inline bool check_load_reservation(reg_t vaddr)
   {
-    reg_t paddr = translate(vaddr, STORE);
+    reg_t paddr = translate(vaddr, 1, STORE);
     if (auto host_addr = sim->addr_to_mem(paddr))
       return load_reservation_address == refill_tlb(vaddr, paddr, host_addr, STORE).target_offset + vaddr;
     else
@@ -311,7 +325,7 @@ private:
   tlb_entry_t fetch_slow_path(reg_t addr);
   void load_slow_path(reg_t addr, reg_t len, uint8_t* bytes);
   void store_slow_path(reg_t addr, reg_t len, const uint8_t* bytes);
-  reg_t translate(reg_t addr, access_type type);
+  reg_t translate(reg_t addr, reg_t len, access_type type);
 
   // ITLB lookup
   inline tlb_entry_t translate_insn_addr(reg_t addr) {
@@ -352,6 +366,9 @@ private:
     }
     return new trigger_matched_t(match, operation, address, data);
   }
+
+  reg_t pmp_homogeneous(reg_t addr, reg_t len);
+  reg_t pmp_ok(reg_t addr, reg_t len, access_type type, reg_t mode);
 
   bool check_triggers_fetch;
   bool check_triggers_load;

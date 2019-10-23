@@ -14,6 +14,7 @@
 entry:
        jal zero, _entry
 resume:
+       // Not used.
        jal zero, _resume
 exception:
        jal zero, _exception
@@ -37,16 +38,22 @@ entry_loop:
         csrr s0, CSR_MHARTID
         lbu  s0, DEBUG_ROM_FLAGS(s0) // multiple harts can resume  here
         andi s0, s0, (1 << DEBUG_ROM_FLAG_RESUME)
-        bnez s0, resume
+        bnez s0, _resume
+        wfi
         jal  zero, entry_loop
 
 _exception:
+        // Restore S0, which we always save to dscratch.
+        // We need this in case the user tried an abstract write to a
+        // non-existent CSR.
+        csrr    s0, CSR_DSCRATCH
         sw      zero, DEBUG_ROM_EXCEPTION(zero) // Let debug module know you got an exception.
         ebreak
 
 going:
+        csrr s0, CSR_MHARTID
+        sw s0, DEBUG_ROM_GOING(zero)     // When debug module sees this write, the GO flag is reset.
         csrr s0, CSR_DSCRATCH            // Restore s0 here
-        sw zero, DEBUG_ROM_GOING(zero)   // When debug module sees this write, the GO flag is reset.
         fence
         fence.i
         jalr zero, zero, %lo(whereto)    // Debug module will put different instructions and data in the RAM, 
