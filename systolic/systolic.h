@@ -10,8 +10,8 @@ typedef int8_t input_t; // Systolic array input datatype (feeding into PEs, movi
 typedef int16_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
 typedef int32_t accum_t; // Accumulator datatype (inside PEs for OS dataflow and for the external accumulator)
 static const uint32_t dim = 16; // Square dimension of systolic array
-static const uint32_t sp_matrices = 10*1024; // Size the scratchpad to fit sp_matrices matrices
-static const uint32_t accum_rows = 128; // Number of systolic array rows in the accumulator
+static const uint32_t sp_matrices = 128*1024; // Size the scratchpad to fit sp_matrices matrices
+static const uint32_t accum_rows = 1024; // Number of systolic array rows in the accumulator
 
 struct systolic_state_t
 {
@@ -24,7 +24,7 @@ struct systolic_state_t
   uint32_t preload_sp_addr;
   Dataflow mode;
   Activation act;
-  reg_t shift;
+  reg_t acc_shift, sys_shift, relu6_shift;
   reg_t load_stride;
   reg_t store_stride;
 
@@ -59,6 +59,7 @@ private:
   const unsigned compute_preloaded_funct = 4;
   const unsigned compute_accumulated_funct = 5;
   const unsigned preload_funct = 6;
+  const unsigned flush_funct = 7;
 
   bool debug;
   input_t apply_activation(input_t value);

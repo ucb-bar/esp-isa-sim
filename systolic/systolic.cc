@@ -14,7 +14,9 @@ void systolic_state_t::reset()
   enable = true;
   mode = OS;
   act = NONE;
-  shift = 0;
+  acc_shift = 0;
+  sys_shift = 0;
+  relu6_shift = 0;
   output_sp_addr = 0;
   load_stride = dim * sizeof(input_t);
   store_stride = dim * sizeof(input_t);
@@ -104,7 +106,7 @@ void systolic_t::mvout(reg_t dram_addr, reg_t sp_addr) {
     for (size_t j = 0; j < dim; ++j) {
       if (accumulator) { // Apply shift and activation when moving out of accumulator
         accum_t acc_value = systolic_state.accumulator->at(base_row_addr + i).at(j);
-        auto shifted = rounding_saturating_shift<input_t>(acc_value, systolic_state.shift);
+        auto shifted = rounding_saturating_shift<input_t>(acc_value, systolic_state.acc_shift);
         input_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
         auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t);
@@ -141,7 +143,7 @@ void systolic_t::setmode(reg_t rs1, reg_t rs2) {
   if ((rs1 & 0b11) == 0) { // rs1[1:0] == 2'b00, config_ex, configure execute pipeline
     systolic_state_t::Dataflow new_mode;
     systolic_state_t::Activation new_act;
-    reg_t new_shift;
+    reg_t new_acc_shift, new_sys_shift, new_relu6_shift;
 
     auto rs1_2 = (rs1 >> 2) & 0b1; // extract rs1[2], 0 = output stationary, 1 = weight stationary
     if (rs1_2 == 0) {
@@ -161,17 +163,27 @@ void systolic_t::setmode(reg_t rs1, reg_t rs2) {
       assert(false);
     }
 
-    new_shift = rs2;
-    assert(new_shift >= 0 && new_shift < sizeof(accum_t)*8);
+    new_acc_shift = (rs1 >> 32) & 0xFFFFFFFF;
+    new_sys_shift = (rs2) & 0xFFFFFFFF;
+    new_relu6_shift = (rs2 >> 32) & 0xFFFFFFFF;
 
     #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
     printf("SYSTOLIC: config_ex - set dataflow mode from %d to %d\n", systolic_state.mode, new_mode);
     printf("SYSTOLIC: config_ex - set activation function from %d to %d\n", systolic_state.act, new_act);
-    printf("SYSTOLIC: config_ex - set shift from %lu to %lu\n", systolic_state.shift, rs2);
+    printf("SYSTOLIC: config_ex - set acc_shift from %lu to %lu\n", systolic_state.acc_shift, new_acc_shift);
+    printf("SYSTOLIC: config_ex - set sys_shift from %lu to %lu\n", systolic_state.sys_shift, new_sys_shift);
+    printf("SYSTOLIC: config_ex - set relu6_shift from %lu to %lu\n", systolic_state.relu6_shift, new_relu6_shift);
     #endif
+
     systolic_state.mode = new_mode;
     systolic_state.act = new_act;
-    systolic_state.shift = new_shift;
+
+    assert(new_acc_shift >= 0 && new_acc_shift < sizeof(accum_t)*8);
+    assert(new_sys_shift >= 0 && new_sys_shift < sizeof(output_t)*8);
+    assert(new_relu6_shift >= 0);
+    systolic_state.acc_shift = new_acc_shift;
+    systolic_state.sys_shift = new_sys_shift;
+    systolic_state.relu6_shift = new_relu6_shift;
   } else if ((rs1 & 0b11) == 1) { // rs1[1:0] == 2'b01, config_mvin, configure load pipeline
     #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
     printf("SYSTOLIC: config_mvin - set load stride from %lu to %lu\n", systolic_state.load_stride, rs2);
@@ -270,7 +282,7 @@ void systolic_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
         accum_t value = systolic_state.mode == systolic_state_t::OS ? systolic_state.pe_state->at(i).at(j) : results->at(i).at(j);
         if (acc) {
           output_t shifted = systolic_state.mode == systolic_state_t::OS ?
-                  rounding_saturating_shift<output_t>(value, systolic_state.shift) :
+                  rounding_saturating_shift<output_t>(value, systolic_state.sys_shift) :
                   rounding_saturating_shift<output_t>(value, 0);
           if (acc_accum) {
             systolic_state.accumulator->at(base_sp_addr + i).at(j) += shifted;
@@ -282,7 +294,7 @@ void systolic_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
           #endif
         } else { // Move to scratchpad, apply activation along the way
           input_t shifted = systolic_state.mode == systolic_state_t::OS ?
-                             rounding_saturating_shift<input_t>(value, systolic_state.shift) :
+                             rounding_saturating_shift<input_t>(value, systolic_state.sys_shift) :
                              rounding_saturating_shift<input_t>(value, 0);
           input_t activated = apply_activation(shifted);
           systolic_state.spad->at(base_sp_addr + i).at(j) = activated;
@@ -310,8 +322,17 @@ reg_t systolic_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     compute(xs1, xs2, true);
   else if (insn.funct == compute_accumulated_funct)
     compute(xs1, xs2, false);
-  else
+  else if (insn.funct == flush_funct) {
+    #ifdef RISCV_ENABLE_SYSTOLC_COMMITLOG
+      printf("SYSTOLIC: flush\n");
+    #endif
+  }
+  else {
+    #ifdef RISCV_ENABLE_SYSTOLC_COMMITLOG
+      printf("SYSTOLIC: encountered unknown instruction with funct: %d\n", insn.funct);
+    #endif
     illegal_instruction();
+  }
   return 0;
 }
 
@@ -322,7 +343,7 @@ input_t systolic_t::apply_activation(input_t value) {
     return value > 0 ? static_cast<input_t>(value) : static_cast<input_t>(0);
   } else if (systolic_state.act == systolic_state_t::RELU6) {
     auto positive = value > 0 ? value : static_cast<input_t>(0);
-    return value > 6 ? static_cast<input_t>(6) : positive;
+    return value > (6 << systolic_state.relu6_shift) ? static_cast<input_t>(6 << systolic_state.relu6_shift) : positive;
   } else if (systolic_state.act == systolic_state_t::NONE) {
     return static_cast<input_t>(value);
   } else assert(false);
