@@ -63,29 +63,36 @@ void systolic_t::write_to_dram(reg_t addr, T data) {
 void systolic_t::mvin(reg_t dram_addr, reg_t sp_addr) {
   bool const accumulator = (((sp_addr >> 31) & 0x1) == 1);
   auto const base_row_addr = (sp_addr & 0x3FFFFFFF); // Strip accumulator addressing bits [31:30]
+  auto const blocks = (sp_addr >> addr_len);
+  assert(blocks >= 1);
 
   #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-  printf("SYSTOLIC: mvin - block from 0x%08lx to addr 0x%08lx\n", dram_addr, sp_addr);
+  printf("SYSTOLIC: mvin - %02lx blocks from 0x%08lx to addr 0x%08lx\n", blocks, dram_addr, sp_addr);
   #endif
 
-  for (size_t i = 0; i < dim; ++i) {
-    auto const dram_row_addr = dram_addr + i*systolic_state.load_stride;
-    for (size_t j = 0; j < dim; ++j) {
-      if (accumulator) {
-        auto const dram_byte_addr = dram_row_addr + j*sizeof(accum_t);
-        auto value = read_from_dram<accum_t>(dram_byte_addr);
-        systolic_state.accumulator->at(base_row_addr + i).at(j) = value;
-        #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-        printf("%d ",systolic_state.accumulator->at(i).at(j));
-        #endif
-      } else {
-        auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t);
-        auto value = read_from_dram<input_t>(dram_byte_addr);
-        systolic_state.spad->at(base_row_addr + i).at(j) = value;
-        #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
-        printf("%d ",systolic_state.spad->at(i).at(j));
-        #endif
+  for (size_t block = 0; block < blocks; ++block) {
+    for (size_t i = 0; i < dim; ++i) {
+      auto const dram_row_addr = dram_addr + i*systolic_state.load_stride;
+      for (size_t j = 0; j < dim; ++j) {
+        if (accumulator) {
+          auto const dram_byte_addr = dram_row_addr + j*sizeof(accum_t) + block*dim*sizeof(accum_t);
+          auto value = read_from_dram<accum_t>(dram_byte_addr);
+          systolic_state.accumulator->at(base_row_addr + i + block*dim).at(j) = value;
+          #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+          printf("%d ",systolic_state.accumulator->at(base_row_addr + i + block*dim).at(j));
+          #endif
+        } else {
+          auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t) + block*dim*sizeof(input_t);
+          auto value = read_from_dram<input_t>(dram_byte_addr);
+          systolic_state.spad->at(base_row_addr + i + block*dim).at(j) = value;
+          #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+          printf("%d ",systolic_state.spad->at(base_row_addr + i + block*dim).at(j));
+          #endif
+        }
       }
+      #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
+      printf("\n");
+      #endif
     }
     #ifdef RISCV_ENABLE_SYSTOLIC_COMMITLOG
     printf("\n");

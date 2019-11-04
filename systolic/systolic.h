@@ -12,6 +12,7 @@ typedef int32_t accum_t; // Accumulator datatype (inside PEs for OS dataflow and
 static const uint32_t dim = 16; // Square dimension of systolic array
 static const uint32_t sp_matrices = 128*1024; // Size the scratchpad to fit sp_matrices matrices
 static const uint32_t accum_rows = 1024; // Number of systolic array rows in the accumulator
+static const uint64_t addr_len = 32; // Number of bits used to address the scratchpad/accumulator
 
 struct systolic_state_t
 {
