@@ -119,6 +119,8 @@ static inline void write_apr(hwacha_t* h, insn_t insn, size_t dst, reg_t value)
 
 static inline reg_t read_ppr(hwacha_t* h, insn_t insn, uint32_t idx, size_t src)
 {
+  if (h->get_ct_state()->nppr == 0)
+    return true;
   if (src >= h->get_ct_state()->nppr)
     h->take_exception(HWACHA_CAUSE_TVEC_ILLEGAL_REGID, uint64_t(insn.bits()));
   return (h->get_ut_state(idx)->PPR[src]);
