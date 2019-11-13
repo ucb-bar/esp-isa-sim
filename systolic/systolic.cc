@@ -372,9 +372,3 @@ T systolic_t::rounding_saturating_shift(accum_t value, uint64_t shift) {
   int64_t elem = shifted > elem_t_max ? elem_t_max : (shifted < elem_t_min ? elem_t_min : shifted);
   return static_cast<T>(elem);
 }
-
-std::vector<disasm_insn_t*> rocc_t::get_disasms()
-{
-  std::vector<disasm_insn_t*> insns;
-  return insns;
-}
