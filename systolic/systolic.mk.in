@@ -13,3 +13,7 @@ systolic_srcs = \
 	systolic.cc \
 
 systolic_test_srcs =
+
+systolic_CFLAGS = -fPIC
+
+systolic_install_shared_lib = yes

@@ -4827,7 +4827,6 @@ fi
     # Add subproject to our running list
 
     subprojects="$subprojects hwacha"
-    subprojects="$subprojects systolic"
 
     # Process the subproject appropriately. If enabled add it to the
     # $enabled_subprojects running shell variable, set a
@@ -4856,6 +4855,54 @@ $as_echo "#define RISCV_ENABLE_HCOMMITLOG /**/" >>confdefs.h
 
 
 fi
+
+
+
+
+
+
+    # Determine if this is a required or an optional subproject
+
+
+
+    # Determine if there is a group with the same name
+
+
+
+    # Create variations of the subproject name suitable for use as a CPP
+    # enabled define, a shell enabled variable, and a shell function
+
+
+
+
+
+
+
+
+
+
+
+    # Add subproject to our running list
+
+    subprojects="$subprojects systolic"
+
+    # Process the subproject appropriately. If enabled add it to the
+    # $enabled_subprojects running shell variable, set a
+    # SUBPROJECT_ENABLED C define, and include the appropriate
+    # 'subproject.ac'.
+
+
+      { $as_echo "$as_me:${as_lineno-$LINENO}: configuring default subproject : systolic" >&5
+$as_echo "$as_me: configuring default subproject : systolic" >&6;}
+      ac_config_files="$ac_config_files systolic.mk:systolic/systolic.mk.in"
+
+      enable_systolic_sproj="yes"
+      subprojects_enabled="$subprojects_enabled systolic"
+
+$as_echo "#define SYSTOLIC_ENABLED /**/" >>confdefs.h
+
+
+
 
 
 
@@ -4898,18 +4945,6 @@ $as_echo "$as_me: configuring default subproject : dummy_rocc" >&6;}
       subprojects_enabled="$subprojects_enabled dummy_rocc"
 
 $as_echo "#define DUMMY_ROCC_ENABLED /**/" >>confdefs.h
-
-
-
-
-      { $as_echo "$as_me:${as_lineno-$LINENO}: configuring default subproject : systolic" >&5
-$as_echo "$as_me: configuring default subproject : systolic" >&6;}
-      ac_config_files="$ac_config_files systolic.mk:systolic/systolic.mk.in"
-
-      enable_systolic_sproj="yes"
-      subprojects_enabled="$subprojects_enabled systolic"
-
-$as_echo "#define SYSTOLIC_ENABLED /**/" >>confdefs.h
 
 
 
