@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <sys/types.h>
 
 class mmu_t;
 class remote_bitbang_t;
@@ -20,10 +21,11 @@ class remote_bitbang_t;
 class sim_t : public htif_t, public simif_t
 {
 public:
-  sim_t(const char* isa, size_t _nprocs,  bool halted, reg_t start_pc,
-        std::vector<std::pair<reg_t, mem_t*>> mems,
+  sim_t(const char* isa, const char* varch, size_t _nprocs, bool halted,
+        reg_t start_pc, std::vector<std::pair<reg_t, mem_t*>> mems,
+        std::vector<std::pair<reg_t, abstract_device_t*>> plugin_devices,
         const std::vector<std::string>& args, const std::vector<int> hartids,
-        unsigned progsize, unsigned max_bus_master_bits, bool require_authentication);
+        const debug_module_config_t &dm_config);
   ~sim_t();
 
   // run the simulation to completion
@@ -31,6 +33,7 @@ public:
   void set_debug(bool value);
   void set_log(bool value);
   void set_histogram(bool value);
+  void set_log_commits(bool value);
   void set_procs_debug(bool value);
   void set_dtb_enabled(bool value) {
     this->dtb_enabled = value;
@@ -47,6 +50,7 @@ public:
 
 private:
   std::vector<std::pair<reg_t, mem_t*>> mems;
+  std::vector<std::pair<reg_t, abstract_device_t*>> plugin_devices;
   mmu_t* debug_mmu;  // debug port into main memory
   std::vector<processor_t*> procs;
   reg_t start_pc;
@@ -65,6 +69,7 @@ private:
   bool debug;
   bool log;
   bool histogram_enabled; // provide a histogram of PCs
+  bool log_commits_enabled;
   bool dtb_enabled;
   remote_bitbang_t* remote_bitbang;
 
@@ -83,6 +88,7 @@ private:
   void interactive_run(const std::string& cmd, const std::vector<std::string>& args, bool noisy);
   void interactive_run_noisy(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_run_silent(const std::string& cmd, const std::vector<std::string>& args);
+  void interactive_vreg(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_reg(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_freg(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_fregs(const std::string& cmd, const std::vector<std::string>& args);
@@ -90,7 +96,9 @@ private:
   void interactive_pc(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_mem(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_str(const std::string& cmd, const std::vector<std::string>& args);
-  void interactive_until(const std::string& cmd, const std::vector<std::string>& args);
+  void interactive_until(const std::string& cmd, const std::vector<std::string>& args, bool noisy);
+  void interactive_until_silent(const std::string& cmd, const std::vector<std::string>& args);
+  void interactive_until_noisy(const std::string& cmd, const std::vector<std::string>& args);
   reg_t get_reg(const std::vector<std::string>& args);
   freg_t get_freg(const std::vector<std::string>& args);
   reg_t get_mem(const std::vector<std::string>& args);

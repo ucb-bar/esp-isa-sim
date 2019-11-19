@@ -4,7 +4,7 @@ libdir=${prefix}/@libdir@
 includedir=${prefix}/@includedir@
 
 Name: riscv-systolic
-Description: RISC-V Hwacha binary library
+Description: RISC-V Systolic library
 Version: git
 Libs: -Wl,-rpath,${libdir} -L${libdir} -lsystolic
 Cflags: -I${includedir}

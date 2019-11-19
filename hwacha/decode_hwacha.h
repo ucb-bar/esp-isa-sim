@@ -26,9 +26,9 @@
 #define WRITE_UTIDX(value) (h->get_ct_state()->count = (value))
 #define WRITE_VF_PC(pcnext) (h->get_ct_state()->vf_pc = (pcnext))
 #define WRITE_PREC(precision) (h->get_ct_state()->prec = (precision))
-#define WRITE_VRM(rm) (h->get_ct_state()->frm = (rm))
+#define WRITE_VFRM(rm) (h->get_ct_state()->frm = (rm))
 
-#define VRM ({ int rm = insn.vrm(); \
+#define VFRM ({ int rm = insn.vrm(); \
               if(rm == 7) rm = h->get_ct_state()->frm; \
               if(rm > 4) throw trap_illegal_instruction(0); \
               rm; })
