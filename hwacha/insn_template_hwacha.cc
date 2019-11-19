@@ -11,7 +11,7 @@ reg_t hwacha_NAME(processor_t* p, insn_t insn, reg_t pc)
   reg_t xs1 = u.r.xs1 ? RS1 : -1;
   reg_t xs2 = u.r.xs2 ? RS2 : -1;
   reg_t xd = -1;
-  #include "insns/NAME.h"
+  #include "hwacha/insns/NAME.h"
   if (u.r.xd) WRITE_RD(xd);
   return npc;
 }
