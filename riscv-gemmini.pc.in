@@ -3,9 +3,9 @@ exec_prefix=@prefix@
 libdir=${prefix}/@libdir@
 includedir=${prefix}/@includedir@
 
-Name: riscv-systolic
-Description: RISC-V Systolic library
+Name: riscv-gemmini
+Description: RISC-V Gemmini library
 Version: git
-Libs: -Wl,-rpath,${libdir} -L${libdir} -lsystolic
+Libs: -Wl,-rpath,${libdir} -L${libdir} -lgemmini
 Cflags: -I${includedir}
 URL: http://riscv.org/download.html#tab_spike
