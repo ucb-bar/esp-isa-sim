@@ -330,7 +330,7 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   else if (insn.funct == compute_accumulated_funct)
     compute(xs1, xs2, false);
   else if (insn.funct == flush_funct) {
-    #ifdef RISCV_ENABLE_SYSTOLC_COMMITLOG
+    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
       printf("GEMMINI: flush\n");
     #endif
   }
