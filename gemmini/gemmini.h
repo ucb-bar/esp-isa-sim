@@ -1,5 +1,5 @@
-#ifndef _SYSTOLIC_H
-#define _SYSTOLIC_H
+#ifndef _GEMMINI_H
+#define _GEMMINI_H
 
 #include "extension.h"
 #include "rocc.h"
@@ -14,13 +14,13 @@ static const uint32_t sp_matrices = 128*1024; // Size the scratchpad to fit sp_m
 static const uint32_t accum_rows = 1024; // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = 32; // Number of bits used to address the scratchpad/accumulator
 
-struct systolic_state_t
+struct gemmini_state_t
 {
   enum Dataflow {OS, WS};
   enum Activation {NONE, RELU, RELU6};
   void reset();
 
-  // 32-bit systolic address space
+  // 32-bit gemmini address space
   uint32_t output_sp_addr;
   uint32_t preload_sp_addr;
   Dataflow mode;
@@ -35,11 +35,11 @@ struct systolic_state_t
   std::vector<std::vector<accum_t>> *accumulator;
 };
 
-class systolic_t : public rocc_t
+class gemmini_t : public rocc_t
 {
 public:
-  systolic_t() : cause(0), aux(0), debug(false) {}
-  const char* name() { return "systolic"; }
+  gemmini_t() : cause(0), aux(0), debug(false) {}
+  const char* name() { return "gemmini"; }
   reg_t custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2);
   void reset();
 
@@ -50,7 +50,7 @@ public:
   void compute(reg_t a_addr, reg_t bd_addr, bool preload);
 
 private:
-  systolic_state_t systolic_state;
+  gemmini_state_t gemmini_state;
   reg_t cause;
   reg_t aux;
 
