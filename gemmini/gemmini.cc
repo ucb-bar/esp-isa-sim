@@ -335,7 +335,7 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     #endif
   }
   else {
-    #ifdef RISCV_ENABLE_SYSTOLC_COMMITLOG
+    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
       printf("GEMMINI: encountered unknown instruction with funct: %d\n", insn.funct);
     #endif
     illegal_instruction();
