@@ -5,8 +5,6 @@
 #include <iostream>
 #include <assert.h>
 
-#define RISCV_ENABLE_GEMMINI_COMMITLOG 1
-
 REGISTER_EXTENSION(gemmini, []() { return new gemmini_t; })
 
 void gemmini_state_t::reset()
@@ -66,9 +64,7 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
   auto const blocks = (sp_addr >> addr_len);
   assert(blocks >= 1);
 
-  #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-  printf("GEMMINI: mvin - %02lx blocks from 0x%08lx to addr 0x%08lx\n", blocks, dram_addr, sp_addr);
-  #endif
+  dprintf("GEMMINI: mvin - %02lx blocks from 0x%08lx to addr 0x%08lx\n", blocks, dram_addr, sp_addr);
 
   for (size_t block = 0; block < blocks; ++block) {
     for (size_t i = 0; i < dim; ++i) {
@@ -78,25 +74,17 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
           auto const dram_byte_addr = dram_row_addr + j*sizeof(accum_t) + block*dim*sizeof(accum_t);
           auto value = read_from_dram<accum_t>(dram_byte_addr);
           gemmini_state.accumulator->at(base_row_addr + i + block*dim).at(j) = value;
-          #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-          printf("%d ",gemmini_state.accumulator->at(base_row_addr + i + block*dim).at(j));
-          #endif
+          dprintf("%d ",gemmini_state.accumulator->at(base_row_addr + i + block*dim).at(j));
         } else {
           auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t) + block*dim*sizeof(input_t);
           auto value = read_from_dram<input_t>(dram_byte_addr);
           gemmini_state.spad->at(base_row_addr + i + block*dim).at(j) = value;
-          #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-          printf("%d ",gemmini_state.spad->at(base_row_addr + i + block*dim).at(j));
-          #endif
+          dprintf("%d ",gemmini_state.spad->at(base_row_addr + i + block*dim).at(j));
         }
       }
-      #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-      printf("\n");
-      #endif
+      dprintf("\n");
     }
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("\n");
-    #endif
+    dprintf("\n");
   }
 }
 
@@ -104,9 +92,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   bool const accumulator = (((sp_addr >> 31) & 0x1) == 1);
   auto const base_row_addr = (sp_addr & 0x3FFFFFFF); // Strip accumulator addressing bits [31:30]
 
-  #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-  printf("GEMMINI: mvout - block from 0x%08lx to addr 0x%08lx\n", base_row_addr, dram_addr);
-  #endif
+  dprintf("GEMMINI: mvout - block from 0x%08lx to addr 0x%08lx\n", base_row_addr, dram_addr);
 
   for (size_t i = 0; i < dim; ++i) {
     auto const dram_row_addr = dram_addr + i*gemmini_state.store_stride;
@@ -118,21 +104,15 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
 
         auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t);
         write_to_dram<input_t>(dram_byte_addr, activated);
-        #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-        printf("%d ", activated);
-        #endif
+        dprintf("%d ", activated);
       } else { // Scratchpad, write to DRAM directly
         auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t);
         input_t value = gemmini_state.spad->at(base_row_addr + i).at(j);
         write_to_dram<input_t>(dram_byte_addr, value);
-        #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-        printf("%d ", value);
-        #endif
+        dprintf("%d ", value);
       }
     }
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("\n");
-    #endif
+    dprintf("\n");
   }
 }
 
@@ -140,10 +120,8 @@ void gemmini_t::preload(reg_t bd_addr, reg_t c_addr) {
   // TODO: rename these state variables
   gemmini_state.preload_sp_addr = static_cast<uint32_t>(bd_addr & 0xFFFFFFFF);
   gemmini_state.output_sp_addr = static_cast<uint32_t>(c_addr & 0xFFFFFFFF);
-  #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("GEMMINI: preload - scratchpad output addr = 0x%08x, scratchpad preload addr = 0x%08x\n",
+  dprintf("GEMMINI: preload - scratchpad output addr = 0x%08x, scratchpad preload addr = 0x%08x\n",
             gemmini_state.output_sp_addr, gemmini_state.preload_sp_addr);
-  #endif
 }
 
 void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
@@ -174,13 +152,11 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
     new_sys_shift = (rs2) & 0xFFFFFFFF;
     new_relu6_shift = (rs2 >> 32) & 0xFFFFFFFF;
 
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("GEMMINI: config_ex - set dataflow mode from %d to %d\n", gemmini_state.mode, new_mode);
-    printf("GEMMINI: config_ex - set activation function from %d to %d\n", gemmini_state.act, new_act);
-    printf("GEMMINI: config_ex - set acc_shift from %lu to %lu\n", gemmini_state.acc_shift, new_acc_shift);
-    printf("GEMMINI: config_ex - set sys_shift from %lu to %lu\n", gemmini_state.sys_shift, new_sys_shift);
-    printf("GEMMINI: config_ex - set relu6_shift from %lu to %lu\n", gemmini_state.relu6_shift, new_relu6_shift);
-    #endif
+    dprintf("GEMMINI: config_ex - set dataflow mode from %d to %d\n", gemmini_state.mode, new_mode);
+    dprintf("GEMMINI: config_ex - set activation function from %d to %d\n", gemmini_state.act, new_act);
+    dprintf("GEMMINI: config_ex - set acc_shift from %lu to %lu\n", gemmini_state.acc_shift, new_acc_shift);
+    dprintf("GEMMINI: config_ex - set sys_shift from %lu to %lu\n", gemmini_state.sys_shift, new_sys_shift);
+    dprintf("GEMMINI: config_ex - set relu6_shift from %lu to %lu\n", gemmini_state.relu6_shift, new_relu6_shift);
 
     gemmini_state.mode = new_mode;
     gemmini_state.act = new_act;
@@ -192,14 +168,10 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
     gemmini_state.sys_shift = new_sys_shift;
     gemmini_state.relu6_shift = new_relu6_shift;
   } else if ((rs1 & 0b11) == 1) { // rs1[1:0] == 2'b01, config_mvin, configure load pipeline
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("GEMMINI: config_mvin - set load stride from %lu to %lu\n", gemmini_state.load_stride, rs2);
-    #endif
+    dprintf("GEMMINI: config_mvin - set load stride from %lu to %lu\n", gemmini_state.load_stride, rs2);
     gemmini_state.load_stride = rs2;
   } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("GEMMINI: config_mvout - set store stride from %lu to %lu\n", gemmini_state.store_stride, rs2);
-    #endif
+    dprintf("GEMMINI: config_mvout - set store stride from %lu to %lu\n", gemmini_state.store_stride, rs2);
     gemmini_state.store_stride = rs2;
   }
 }
@@ -208,16 +180,12 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   auto a_addr_real = static_cast<uint32_t>(a_addr & 0xFFFFFFFF);
   auto bd_addr_real = static_cast<uint32_t>(bd_addr & 0xFFFFFFFF);
 
-  #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("GEMMINI: compute - preload = %d, scratchpad A addr = 0x%08x,"
+  dprintf("GEMMINI: compute - preload = %d, scratchpad A addr = 0x%08x,"
            "scratchpad B addr 0x%08x\n", preload, a_addr_real, bd_addr_real);
-  #endif
 
   // Preload
   if (preload) {
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("GEMMINI: compute - PEs after preloading:\n");
-    #endif
+    dprintf("GEMMINI: compute - PEs after preloading:\n");
     for (size_t i = 0; i < dim; i++) {
       for (size_t j = 0; j < dim; j++) {
         // TODO: Handle preloads from accumulator, values are shifted and activated before preload
@@ -231,11 +199,9 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
                 gemmini_state.spad->at(gemmini_state.preload_sp_addr + i).at(j);
         gemmini_state.pe_state->at(i).at(j) = preload_value;
 
-        #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-        printf("%d ", gemmini_state.pe_state->at(i).at(j));
-        #endif
+        dprintf("%d ", gemmini_state.pe_state->at(i).at(j));
       }
-      printf("\n");
+      dprintf("\n");
     }
   }
 
@@ -261,18 +227,12 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
     }
   }
 
-  #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-  printf("GEMMINI: compute - PEs after matmul:\n");
-  #endif
+  dprintf("GEMMINI: compute - PEs after matmul:\n");
   for (size_t i = 0; i < dim; ++i) {
     for (size_t j = 0; j < dim; ++j) {
-      #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-      printf("%d ", gemmini_state.pe_state->at(i).at(j));
-      #endif
+      dprintf("%d ", gemmini_state.pe_state->at(i).at(j));
     }
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("\n");
-    #endif
+    dprintf("\n");
   }
 
   // Write results
@@ -280,9 +240,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
     bool const acc = (((gemmini_state.output_sp_addr >> 31) & 0x1) == 1);
     bool const acc_accum = (((gemmini_state.output_sp_addr >> 30) & 0x1) == 1);
     auto const base_sp_addr = gemmini_state.output_sp_addr & 0x3FFFFFFF;
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-    printf("GEMMINI: compute - writing results to addr 0x%08x, :\n", gemmini_state.output_sp_addr);
-    #endif
+    dprintf("GEMMINI: compute - writing results to addr 0x%08x, :\n", gemmini_state.output_sp_addr);
 
     for (size_t i = 0; i < dim; ++i) {
       for (size_t j = 0; j < dim; ++j) {
@@ -296,21 +254,17 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
           } else { // Overwrite
             gemmini_state.accumulator->at(base_sp_addr + i).at(j) = shifted;
           }
-          #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-          printf("%d ", gemmini_state.accumulator->at(base_sp_addr + i).at(j));
-          #endif
+          dprintf("%d ", gemmini_state.accumulator->at(base_sp_addr + i).at(j));
         } else { // Move to scratchpad, apply activation along the way
           input_t shifted = gemmini_state.mode == gemmini_state_t::OS ?
                              rounding_saturating_shift<input_t>(value, gemmini_state.sys_shift) :
                              rounding_saturating_shift<input_t>(value, 0);
           input_t activated = apply_activation(shifted);
           gemmini_state.spad->at(base_sp_addr + i).at(j) = activated;
-          #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-          printf("%d ", gemmini_state.spad->at(base_sp_addr + i).at(j));
-          #endif
+          dprintf("%d ", gemmini_state.spad->at(base_sp_addr + i).at(j));
         }
       }
-      printf("\n");
+      dprintf("\n");
     }
   }
 }
@@ -330,14 +284,10 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   else if (insn.funct == compute_accumulated_funct)
     compute(xs1, xs2, false);
   else if (insn.funct == flush_funct) {
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-      printf("GEMMINI: flush\n");
-    #endif
+    dprintf("GEMMINI: flush\n");
   }
   else {
-    #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
-      printf("GEMMINI: encountered unknown instruction with funct: %d\n", insn.funct);
-    #endif
+    dprintf("GEMMINI: encountered unknown instruction with funct: %d\n", insn.funct);
     illegal_instruction();
   }
   return 0;

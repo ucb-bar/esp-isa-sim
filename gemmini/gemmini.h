@@ -14,6 +14,12 @@ static const uint32_t sp_matrices = 128*1024; // Size the scratchpad to fit sp_m
 static const uint32_t accum_rows = 1024; // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = 32; // Number of bits used to address the scratchpad/accumulator
 
+#ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
+#define dprintf(...) printf(__VA_ARGS__)
+#else
+#define dprintf(...)
+#endif
+
 struct gemmini_state_t
 {
   enum Dataflow {OS, WS};

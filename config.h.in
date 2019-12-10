@@ -81,6 +81,9 @@
 /* Enable Hwacha commit log generation */
 #undef RISCV_ENABLE_HCOMMITLOG
 
+/* Enable Gemmini commit log generation */
+#undef RISCV_ENABLE_GEMMINI_COMMITLOG
+
 /* Enable PC histogram generation */
 #undef RISCV_ENABLE_HISTOGRAM
 
