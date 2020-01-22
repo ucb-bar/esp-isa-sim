@@ -308,13 +308,10 @@ input_t gemmini_t::apply_activation(input_t value) {
 
 template <class T>
 T gemmini_t::rounding_saturating_shift(accum_t value, uint64_t shift) {
-  // Implementation taken from gemmini-rocc-tests/include/gemmini.h (matshift() function)
-  int divisor = 1 << shift;
-  // Bitshift and round element
-  int64_t abs = value > 0 ? value : -value;
-  int64_t shifted = (abs + (divisor/2)) / divisor;
-  if (value < 0)
-    shifted = -shifted;
+  // Rounding right shift equation: https://riscv.github.io/documents/riscv-v-spec/#_vector_fixed_point_rounding_mode_register_vxrm
+  int r = (shift == 0 ? 0 : ((value >> (shift-1)) & 1)) &
+       (((shift <= 1 ? 0 : (value & ((1 << (shift-1)) - 1))) != 0) | ((value >> shift) & 1));
+  accum_t shifted = (value >> shift) + r;
 
   // Saturate and cast element
   auto elem_t_max = std::numeric_limits<T>::max();
