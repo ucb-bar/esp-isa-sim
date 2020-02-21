@@ -269,8 +269,43 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   }
 }
 
+void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
+  const auto A_sp_addr_start = static_cast<uint32_t>(rs1 & 0xFFFFFFFF);
+  const auto B_sp_addr_start = static_cast<uint32_t>((rs1 >> 32) & 0xFFFFFFFF);
+  uint32_t C_sp_addr_start = 3 << (addr_len - 2);
+
+  const auto I = static_cast<uint32_t>(rs2 & 0xFFFF);
+  const auto J = static_cast<uint32_t>((rs2 >> 16) & 0xFFFF);
+  const auto K = static_cast<uint32_t>((rs2 >> 32) & 0xFFFF);
+
+  const auto bias = static_cast<bool>((rs2 >> 48) & 0x1);
+
+  const uint32_t garbage_addr = ~0;
+
+  for (size_t j = 0; j < J; j++) {
+    for (size_t k = 0; k < K; k++) {
+      const uint32_t B_sp_addr = B_sp_addr_start + (k * J + j) * dim;
+
+      for (size_t i = 0; i < I; i++) {
+        const uint32_t A_sp_addr = A_sp_addr_start + (i*K + k)*dim;
+        const uint32_t C_sp_addr = C_sp_addr_start + (i*J + j)*dim;
+
+        const uint32_t pre_sp_addr = i == 0 ? B_sp_addr : garbage_addr;
+        uint32_t out_sp_addr = C_sp_addr;
+
+        int no_bias_new_matrix = !bias && k == 0;
+        if (no_bias_new_matrix) {
+          out_sp_addr &= ~(1 << (addr_len-2));
+        }
+
+        preload(pre_sp_addr, out_sp_addr);
+        compute(A_sp_addr, garbage_addr, i == 0);
+      }
+    }
+  }
+}
+
 reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
-  insn.funct = (insn.funct & 0b111); // Strip the dependency bits from the funct field
   if (insn.funct == mvin_funct)
     mvin(xs1, xs2);
   else if (insn.funct == mvout_funct)
@@ -286,7 +321,9 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   else if (insn.funct == flush_funct) {
     dprintf("GEMMINI: flush\n");
   }
-  else {
+  else if (insn.funct == loop_ws_funct) {
+    loop_ws(xs1, xs2);
+  } else {
     dprintf("GEMMINI: encountered unknown instruction with funct: %d\n", insn.funct);
     illegal_instruction();
   }

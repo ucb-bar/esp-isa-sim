@@ -7,11 +7,11 @@
 #include <limits>
 
 typedef int8_t input_t; // Systolic array input datatype (feeding into PEs, moving out of accumulator)
-typedef int16_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
+typedef int32_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
 typedef int32_t accum_t; // Accumulator datatype (inside PEs for OS dataflow and for the external accumulator)
-static const uint32_t dim = 16; // Square dimension of systolic array
-static const uint32_t sp_matrices = 128*1024; // Size the scratchpad to fit sp_matrices matrices
-static const uint32_t accum_rows = 1024; // Number of systolic array rows in the accumulator
+static const uint32_t dim = 64; // Square dimension of systolic array
+static const uint32_t sp_matrices = (256 * 1024) / (dim * dim * sizeof(input_t)); // Size the scratchpad to fit sp_matrices matrices
+static const uint32_t accum_rows = (64 * 1024) / (dim * sizeof(accum_t)); // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = 32; // Number of bits used to address the scratchpad/accumulator
 
 #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
@@ -54,6 +54,7 @@ public:
   void preload(reg_t bd_addr, reg_t c_addr);
   void setmode(reg_t rs1, reg_t rs2);
   void compute(reg_t a_addr, reg_t bd_addr, bool preload);
+  void loop_ws(reg_t rs1, reg_t rs2);
 
 private:
   gemmini_state_t gemmini_state;
@@ -67,6 +68,7 @@ private:
   const unsigned compute_accumulated_funct = 5;
   const unsigned preload_funct = 6;
   const unsigned flush_funct = 7;
+  const unsigned loop_ws_funct = 8;
 
   bool debug;
   input_t apply_activation(input_t value);
