@@ -9,7 +9,7 @@
 typedef int8_t input_t; // Systolic array input datatype (feeding into PEs, moving out of accumulator)
 typedef int32_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
 typedef int32_t accum_t; // Accumulator datatype (inside PEs for OS dataflow and for the external accumulator)
-static const uint32_t dim = 64; // Square dimension of systolic array
+static const uint32_t dim = 32; // Square dimension of systolic array
 static const uint32_t sp_matrices = (256 * 1024) / (dim * dim * sizeof(input_t)); // Size the scratchpad to fit sp_matrices matrices
 static const uint32_t accum_rows = (64 * 1024) / (dim * sizeof(accum_t)); // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = 32; // Number of bits used to address the scratchpad/accumulator
