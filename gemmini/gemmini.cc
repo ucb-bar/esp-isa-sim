@@ -61,28 +61,29 @@ void gemmini_t::write_to_dram(reg_t addr, T data) {
 void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
   bool const accumulator = (((sp_addr >> 31) & 0x1) == 1);
   auto const base_row_addr = (sp_addr & 0x3FFFFFFF); // Strip accumulator addressing bits [31:30]
-  auto const blocks = (sp_addr >> addr_len);
-  assert(blocks >= 1);
+  auto const cols = (sp_addr >> addr_len) & 0xFFFF;
+  auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
 
-  dprintf("GEMMINI: mvin - %02lx blocks from 0x%08lx to addr 0x%08lx\n", blocks, dram_addr, sp_addr);
+  dprintf("GEMMINI: mvin - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, dram_addr, sp_addr);
 
-  for (size_t block = 0; block < blocks; ++block) {
-    for (size_t i = 0; i < dim; ++i) {
-      auto const dram_row_addr = dram_addr + i*gemmini_state.load_stride;
-      for (size_t j = 0; j < dim; ++j) {
-        if (accumulator) {
-          auto const dram_byte_addr = dram_row_addr + j*sizeof(accum_t) + block*dim*sizeof(accum_t);
+  for (size_t row = 0; row < rows; ++row) {
+    auto const dram_row_addr = dram_addr + row*gemmini_state.load_stride;
+
+    for (size_t col = 0; col < cols; ++col) {
+      const size_t block = col / dim;
+      const size_t spad_col = col % dim;
+
+      if (accumulator) {
+          auto const dram_byte_addr = dram_row_addr + col*sizeof(accum_t);
           auto value = read_from_dram<accum_t>(dram_byte_addr);
-          gemmini_state.accumulator->at(base_row_addr + i + block*dim).at(j) = value;
-          dprintf("%d ",gemmini_state.accumulator->at(base_row_addr + i + block*dim).at(j));
-        } else {
-          auto const dram_byte_addr = dram_row_addr + j*sizeof(input_t) + block*dim*sizeof(input_t);
+          gemmini_state.accumulator->at(base_row_addr + row + block*dim).at(spad_col) = value;
+          dprintf("%d ", gemmini_state.accumulator->at(base_row_addr + row + block*dim).at(spad_col));
+      } else {
+          auto const dram_byte_addr = dram_row_addr + col*sizeof(input_t);
           auto value = read_from_dram<input_t>(dram_byte_addr);
-          gemmini_state.spad->at(base_row_addr + i + block*dim).at(j) = value;
-          dprintf("%d ",gemmini_state.spad->at(base_row_addr + i + block*dim).at(j));
-        }
+          gemmini_state.spad->at(base_row_addr + row + block*dim).at(spad_col) = value;
+          dprintf("%d ", gemmini_state.spad->at(base_row_addr + row + block*dim).at(spad_col));
       }
-      dprintf("\n");
     }
     dprintf("\n");
   }
@@ -91,12 +92,14 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   bool const accumulator = (((sp_addr >> 31) & 0x1) == 1);
   auto const base_row_addr = (sp_addr & 0x3FFFFFFF); // Strip accumulator addressing bits [31:30]
+  auto const cols = (sp_addr >> addr_len) & 0xFFFF;
+  auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
 
-  dprintf("GEMMINI: mvout - block from 0x%08lx to addr 0x%08lx\n", base_row_addr, dram_addr);
+  dprintf("GEMMINI: mvout - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, base_row_addr, dram_addr);
 
-  for (size_t i = 0; i < dim; ++i) {
+  for (size_t i = 0; i < rows; ++i) {
     auto const dram_row_addr = dram_addr + i*gemmini_state.store_stride;
-    for (size_t j = 0; j < dim; ++j) {
+    for (size_t j = 0; j < cols; ++j) {
       if (accumulator) { // Apply shift and activation when moving out of accumulator
         accum_t acc_value = gemmini_state.accumulator->at(base_row_addr + i).at(j);
         auto shifted = rounding_saturating_shift<input_t>(acc_value, gemmini_state.acc_shift);
@@ -120,6 +123,12 @@ void gemmini_t::preload(reg_t bd_addr, reg_t c_addr) {
   // TODO: rename these state variables
   gemmini_state.preload_sp_addr = static_cast<uint32_t>(bd_addr & 0xFFFFFFFF);
   gemmini_state.output_sp_addr = static_cast<uint32_t>(c_addr & 0xFFFFFFFF);
+
+  gemmini_state.preload_cols = (bd_addr >> addr_len) & 0xFFFF;
+  gemmini_state.preload_rows = (bd_addr >> (addr_len + 16)) & 0xFFFF;
+  gemmini_state.output_cols = (c_addr >> addr_len) & 0xFFFF;
+  gemmini_state.output_rows = (c_addr >> (addr_len + 16)) & 0xFFFF;
+
   dprintf("GEMMINI: preload - scratchpad output addr = 0x%08x, scratchpad preload addr = 0x%08x\n",
             gemmini_state.output_sp_addr, gemmini_state.preload_sp_addr);
 }
@@ -180,6 +189,12 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   auto a_addr_real = static_cast<uint32_t>(a_addr & 0xFFFFFFFF);
   auto bd_addr_real = static_cast<uint32_t>(bd_addr & 0xFFFFFFFF);
 
+  const uint16_t a_cols = (a_addr >> addr_len) & 0xFFFF;
+  const uint16_t a_rows = (a_addr >> (addr_len + 16)) & 0xFFFF;
+
+  const uint16_t bd_cols = (bd_addr >> addr_len) & 0xFFFF;
+  const uint16_t bd_rows = (bd_addr >> (addr_len + 16)) & 0xFFFF;
+
   dprintf("GEMMINI: compute - preload = %d, scratchpad A addr = 0x%08x,"
            "scratchpad B addr 0x%08x\n", preload, a_addr_real, bd_addr_real);
 
@@ -195,9 +210,13 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
 
         // In OS mode, pe_state stores the accumulator values
         // In WS mode, pe_state stores the persistent weight matrix
-        auto preload_value = (~gemmini_state.preload_sp_addr == 0) ? 0 :
-                gemmini_state.spad->at(gemmini_state.preload_sp_addr + i).at(j);
-        gemmini_state.pe_state->at(i).at(j) = preload_value;
+        if (i < gemmini_state.preload_rows && j < gemmini_state.preload_cols) {
+          auto preload_value = (~gemmini_state.preload_sp_addr == 0) ? 0 :
+                  gemmini_state.spad->at(gemmini_state.preload_sp_addr + i).at(j);
+          gemmini_state.pe_state->at(i).at(j) = preload_value;
+        } else {
+          gemmini_state.pe_state->at(i).at(j) = 0;
+        }
 
         dprintf("%d ", gemmini_state.pe_state->at(i).at(j));
       }
@@ -211,17 +230,25 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   auto results = new std::vector<std::vector<accum_t>>(dim, std::vector<accum_t>(dim));
   for (size_t i = 0; i < dim; ++i) {
     for (size_t j = 0; j < dim; ++j) {
-      results->at(i).at(j) = (~bd_addr_real == 0) ? 0 : gemmini_state.spad->at(bd_addr_real + i).at(j);
+      if (i < bd_rows && j < bd_cols) {
+        results->at(i).at(j) = (~bd_addr_real == 0) ? 0 : gemmini_state.spad->at(bd_addr_real + i).at(j);
+      } else {
+        results->at(i).at(j) = 0;
+      }
     }
   }
+
   for (size_t i = 0; i < dim; ++i) {
     for (size_t j = 0; j < dim; ++j) {
       for (size_t k = 0; k < dim; ++k) {
+        const auto a = i < a_rows && k < a_cols ? gemmini_state.spad->at(a_addr_real + i).at(k) : 0;
+
         if (gemmini_state.mode == gemmini_state_t::WS) {
-          results->at(i).at(j) += gemmini_state.spad->at(a_addr_real + i).at(k) * gemmini_state.pe_state->at(k).at(j);
+          results->at(i).at(j) += a * gemmini_state.pe_state->at(k).at(j);
         } else {
-          gemmini_state.pe_state->at(i).at(j) +=
-                  gemmini_state.spad->at(a_addr_real + i).at(k) * gemmini_state.spad->at(bd_addr_real + k).at(j);
+          const auto b = k < bd_rows && j < bd_cols ? gemmini_state.spad->at(bd_addr_real + k).at(j) : 0;
+
+          gemmini_state.pe_state->at(i).at(j) += a * b;
         }
       }
     }
@@ -242,8 +269,8 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
     auto const base_sp_addr = gemmini_state.output_sp_addr & 0x3FFFFFFF;
     dprintf("GEMMINI: compute - writing results to addr 0x%08x, :\n", gemmini_state.output_sp_addr);
 
-    for (size_t i = 0; i < dim; ++i) {
-      for (size_t j = 0; j < dim; ++j) {
+    for (size_t i = 0; i < gemmini_state.output_rows; ++i) {
+      for (size_t j = 0; j < gemmini_state.output_cols; ++j) {
         accum_t value = gemmini_state.mode == gemmini_state_t::OS ? gemmini_state.pe_state->at(i).at(j) : results->at(i).at(j);
         if (acc) {
           output_t shifted = gemmini_state.mode == gemmini_state_t::OS ?

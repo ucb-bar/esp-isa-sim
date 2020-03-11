@@ -29,6 +29,8 @@ struct gemmini_state_t
   // 32-bit gemmini address space
   uint32_t output_sp_addr;
   uint32_t preload_sp_addr;
+  uint16_t preload_cols, preload_rows;
+  uint16_t output_cols, output_rows;
   Dataflow mode;
   Activation act;
   reg_t acc_shift, sys_shift, relu6_shift;
