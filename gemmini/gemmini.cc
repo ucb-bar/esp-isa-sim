@@ -227,13 +227,13 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   // Compute
   // For OS, accumulate the PE results internally in pe_state
   // For WS, allocate a new results array which won't affect pe_state, seed the results array with the bias (D) matrix
-  auto results = new std::vector<std::vector<accum_t>>(dim, std::vector<accum_t>(dim));
+  auto results = std::vector<std::vector<accum_t>>(dim, std::vector<accum_t>(dim));
   for (size_t i = 0; i < dim; ++i) {
     for (size_t j = 0; j < dim; ++j) {
       if (i < bd_rows && j < bd_cols) {
-        results->at(i).at(j) = (~bd_addr_real == 0) ? 0 : gemmini_state.spad->at(bd_addr_real + i).at(j);
+        results.at(i).at(j) = (~bd_addr_real == 0) ? 0 : gemmini_state.spad->at(bd_addr_real + i).at(j);
       } else {
-        results->at(i).at(j) = 0;
+        results.at(i).at(j) = 0;
       }
     }
   }
@@ -244,7 +244,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
         const auto a = i < a_rows && k < a_cols ? gemmini_state.spad->at(a_addr_real + i).at(k) : 0;
 
         if (gemmini_state.mode == gemmini_state_t::WS) {
-          results->at(i).at(j) += a * gemmini_state.pe_state->at(k).at(j);
+          results.at(i).at(j) += a * gemmini_state.pe_state->at(k).at(j);
         } else {
           const auto b = k < bd_rows && j < bd_cols ? gemmini_state.spad->at(bd_addr_real + k).at(j) : 0;
 
@@ -271,7 +271,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
 
     for (size_t i = 0; i < gemmini_state.output_rows; ++i) {
       for (size_t j = 0; j < gemmini_state.output_cols; ++j) {
-        accum_t value = gemmini_state.mode == gemmini_state_t::OS ? gemmini_state.pe_state->at(i).at(j) : results->at(i).at(j);
+        accum_t value = gemmini_state.mode == gemmini_state_t::OS ? gemmini_state.pe_state->at(i).at(j) : results.at(i).at(j);
         if (acc) {
           output_t shifted = gemmini_state.mode == gemmini_state_t::OS ?
                   rounding_saturating_shift<output_t>(value, gemmini_state.sys_shift) :
