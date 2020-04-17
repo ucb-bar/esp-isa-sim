@@ -9,6 +9,8 @@
 typedef int8_t input_t; // Systolic array input datatype (feeding into PEs, moving out of accumulator)
 typedef int16_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
 typedef int32_t accum_t; // Accumulator datatype (inside PEs for OS dataflow and for the external accumulator)
+typedef int8_t load_scale_t; // The type of the multiplicand when scaling inputs during mvins
+typedef int8_t load_scale_t_bits; // The bit representation of load_scale_t
 static const uint32_t dim = 16; // Square dimension of systolic array
 static const uint32_t sp_matrices = 128*1024; // Size the scratchpad to fit sp_matrices matrices
 static const uint32_t accum_rows = 1024; // Number of systolic array rows in the accumulator
@@ -36,6 +38,7 @@ struct gemmini_state_t
   reg_t acc_shift, sys_shift, relu6_shift;
   reg_t load_stride;
   reg_t store_stride;
+  reg_t load_scale;
 
   bool enable;
   std::vector<std::vector<input_t>> *spad; // Scratchpad constructed as systolic array rows
@@ -81,6 +84,9 @@ private:
 
   template <class T>
   void write_to_dram(reg_t addr, T data);
+
+  load_scale_t_bits load_scale_t_to_load_scale_t_bits(load_scale_t scale);
+  load_scale_t load_scale_t_bits_to_load_scale_t(load_scale_t_bits bits);
 };
 
 #endif

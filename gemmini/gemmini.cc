@@ -76,12 +76,12 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
       if (accumulator) {
           auto const dram_byte_addr = dram_row_addr + col*sizeof(accum_t);
           auto value = read_from_dram<accum_t>(dram_byte_addr);
-          gemmini_state.accumulator->at(base_row_addr + row + block*dim).at(spad_col) = value;
+          gemmini_state.accumulator->at(base_row_addr + row + block*dim).at(spad_col) = gemmini_state.load_scale * value;
           dprintf("%d ", gemmini_state.accumulator->at(base_row_addr + row + block*dim).at(spad_col));
       } else {
           auto const dram_byte_addr = dram_row_addr + col*sizeof(input_t);
           auto value = read_from_dram<input_t>(dram_byte_addr);
-          gemmini_state.spad->at(base_row_addr + row + block*dim).at(spad_col) = value;
+          gemmini_state.spad->at(base_row_addr + row + block*dim).at(spad_col) = gemmini_state.load_scale * value;
           dprintf("%d ", gemmini_state.spad->at(base_row_addr + row + block*dim).at(spad_col));
       }
     }
@@ -179,6 +179,7 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
   } else if ((rs1 & 0b11) == 1) { // rs1[1:0] == 2'b01, config_mvin, configure load pipeline
     dprintf("GEMMINI: config_mvin - set load stride from %lu to %lu\n", gemmini_state.load_stride, rs2);
     gemmini_state.load_stride = rs2;
+    gemmini_state.load_scale = load_scale_t_bits_to_load_scale_t(rs1 >> 32);
   } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
     dprintf("GEMMINI: config_mvout - set store stride from %lu to %lu\n", gemmini_state.store_stride, rs2);
     gemmini_state.store_stride = rs2;
@@ -318,6 +319,26 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     illegal_instruction();
   }
   return 0;
+}
+
+load_scale_t_bits gemmini_t::load_scale_t_to_load_scale_t_bits(load_scale_t scale) {
+    union {
+        load_scale_t scale;
+        load_scale_t_bits bits;
+    } un;
+
+    un.scale = scale;
+    return un.bits;
+}
+
+load_scale_t gemmini_t::load_scale_t_bits_to_load_scale_t(load_scale_t_bits bits) {
+    union {
+        load_scale_t scale;
+        load_scale_t_bits bits;
+    } un;
+
+    un.bits = bits;
+    return un.scale;
 }
 
 // Applying activation from PE post-shifted output to scratchpad (for OS dataflow)
