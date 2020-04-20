@@ -24,8 +24,8 @@ void gemmini_state_t::reset()
       spad->at(row).at(elem) = 0;
     }
   }
-  pe_state = new std::vector<std::vector<accum_t>>(DIM, std::vector<accum_t>(DIM));
-  accumulator = new std::vector<std::vector<accum_t>>(accum_rows, std::vector<accum_t>(DIM));
+  pe_state = new std::vector<std::vector<acc_t>>(DIM, std::vector<acc_t>(DIM));
+  accumulator = new std::vector<std::vector<acc_t>>(accum_rows, std::vector<acc_t>(DIM));
   for (size_t row = 0; row < accum_rows; ++row) {
     for (size_t elem = 0; elem < DIM; ++elem) {
       accumulator->at(row).at(elem) = 0;
@@ -74,14 +74,22 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
       const size_t spad_col = col % DIM;
 
       if (accumulator) {
-          auto const dram_byte_addr = dram_row_addr + col*sizeof(accum_t);
-          auto value = read_from_dram<accum_t>(dram_byte_addr);
+          auto const dram_byte_addr = dram_row_addr + col*sizeof(acc_t);
+          auto value = read_from_dram<acc_t>(dram_byte_addr);
+#ifdef HAS_MVIN_ACC_SCALE
           gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
+#else
+          gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col) = value;
+#endif
           dprintf("%d ", gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col));
       } else {
           auto const dram_byte_addr = dram_row_addr + col*sizeof(elem_t);
           auto value = read_from_dram<elem_t>(dram_byte_addr);
+#ifdef HAS_MVIN_SCALE
           gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
+#else
+          gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col) = value;
+#endif
           dprintf("%d ", gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col));
       }
     }
@@ -101,7 +109,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
     auto const dram_row_addr = dram_addr + i*gemmini_state.store_stride;
     for (size_t j = 0; j < cols; ++j) {
       if (accumulator) { // Apply shift and activation when moving out of accumulator
-        accum_t acc_value = gemmini_state.accumulator->at(base_row_addr + i).at(j);
+        acc_t acc_value = gemmini_state.accumulator->at(base_row_addr + i).at(j);
         auto shifted = rounding_saturating_shift<elem_t>(acc_value, gemmini_state.acc_shift);
         elem_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
@@ -170,7 +178,7 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
     gemmini_state.mode = new_mode;
     gemmini_state.act = new_act;
 
-    assert(new_acc_shift >= 0 && new_acc_shift < sizeof(accum_t)*8);
+    assert(new_acc_shift >= 0 && new_acc_shift < sizeof(acc_t)*8);
     assert(new_sys_shift >= 0 && new_sys_shift < sizeof(output_t)*8);
     assert(new_relu6_shift >= 0);
     gemmini_state.acc_shift = new_acc_shift;
@@ -179,7 +187,9 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
   } else if ((rs1 & 0b11) == 1) { // rs1[1:0] == 2'b01, config_mvin, configure load pipeline
     dprintf("GEMMINI: config_mvin - set load stride from %lu to %lu\n", gemmini_state.load_stride, rs2);
     gemmini_state.load_stride = rs2;
+#if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
     gemmini_state.load_scale = scale_t_bits_to_scale_t(rs1 >> 32);
+#endif
   } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
     dprintf("GEMMINI: config_mvout - set store stride from %lu to %lu\n", gemmini_state.store_stride, rs2);
     gemmini_state.store_stride = rs2;
@@ -228,7 +238,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   // Compute
   // For OS, accumulate the PE results internally in pe_state
   // For WS, allocate a new results array which won't affect pe_state, seed the results array with the bias (D) matrix
-  auto results = new std::vector<std::vector<accum_t>>(DIM, std::vector<accum_t>(DIM));
+  auto results = new std::vector<std::vector<acc_t>>(DIM, std::vector<acc_t>(DIM));
   for (size_t i = 0; i < DIM; ++i) {
     for (size_t j = 0; j < DIM; ++j) {
       if (i < bd_rows && j < bd_cols) {
@@ -272,7 +282,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
 
     for (size_t i = 0; i < gemmini_state.output_rows; ++i) {
       for (size_t j = 0; j < gemmini_state.output_cols; ++j) {
-        accum_t value = gemmini_state.mode == gemmini_state_t::OS ? gemmini_state.pe_state->at(i).at(j) : results->at(i).at(j);
+        acc_t value = gemmini_state.mode == gemmini_state_t::OS ? gemmini_state.pe_state->at(i).at(j) : results->at(i).at(j);
         if (acc) {
           output_t shifted = gemmini_state.mode == gemmini_state_t::OS ?
                   rounding_saturating_shift<output_t>(value, gemmini_state.sys_shift) :
@@ -321,6 +331,7 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   return 0;
 }
 
+#if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
 scale_t_bits gemmini_t::scale_t_to_scale_t_bits(scale_t scale) {
     union {
         scale_t scale;
@@ -340,6 +351,7 @@ scale_t gemmini_t::scale_t_bits_to_scale_t(scale_t_bits bits) {
     un.bits = bits;
     return un.scale;
 }
+#endif
 
 // Applying activation from PE post-shifted output to scratchpad (for OS dataflow)
 // or from accumulator to DRAM (after shifting, for WS dataflow)
@@ -355,11 +367,11 @@ elem_t gemmini_t::apply_activation(elem_t value) {
 }
 
 template <class T>
-T gemmini_t::rounding_saturating_shift(accum_t value, uint64_t shift) {
+T gemmini_t::rounding_saturating_shift(acc_t value, uint64_t shift) {
   // Rounding right shift equation: https://riscv.github.io/documents/riscv-v-spec/#_vector_fixed_point_rounding_mode_register_vxrm
   int r = (shift == 0 ? 0 : ((value >> (shift-1)) & 1)) &
        (((shift <= 1 ? 0 : (value & ((1 << (shift-1)) - 1))) != 0) | ((value >> shift) & 1));
-  accum_t shifted = (value >> shift) + r;
+  acc_t shifted = (value >> shift) + r;
 
   // Saturate and cast element
   auto elem_t_max = std::numeric_limits<T>::max();

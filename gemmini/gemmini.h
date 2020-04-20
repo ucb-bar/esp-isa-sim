@@ -34,7 +34,9 @@ struct gemmini_state_t
   reg_t acc_shift, sys_shift, relu6_shift;
   reg_t load_stride;
   reg_t store_stride;
+#ifdef HAS_MVIN_SCALE
   reg_t load_scale;
+#endif
 
   bool enable;
   std::vector<std::vector<elem_t>> *spad; // Scratchpad constructed as systolic array rows
@@ -81,8 +83,10 @@ private:
   template <class T>
   void write_to_dram(reg_t addr, T data);
 
+#if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
   scale_t_bits scale_t_to_scale_t_bits(scale_t scale);
   scale_t scale_t_bits_to_scale_t(scale_t_bits bits);
+#endif
 };
 
 #endif
