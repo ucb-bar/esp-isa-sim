@@ -5,16 +5,12 @@
 #include "rocc.h"
 #include <random>
 #include <limits>
+#include "gemmini_params.h"
 
-typedef int8_t input_t; // Systolic array input datatype (feeding into PEs, moving out of accumulator)
-typedef int16_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
-typedef int32_t accum_t; // Accumulator datatype (inside PEs for OS dataflow and for the external accumulator)
-typedef int8_t load_scale_t; // The type of the multiplicand when scaling inputs during mvins
-typedef int8_t load_scale_t_bits; // The bit representation of load_scale_t
-static const uint32_t dim = 16; // Square dimension of systolic array
-static const uint32_t sp_matrices = 128*1024; // Size the scratchpad to fit sp_matrices matrices
-static const uint32_t accum_rows = 1024; // Number of systolic array rows in the accumulator
-static const uint64_t addr_len = 32; // Number of bits used to address the scratchpad/accumulator
+typedef acc_t output_t; // Systolic array output datatype (coming down from PEs, moving into accumulator)
+static const uint32_t sp_matrices = (BANK_NUM * BANK_ROWS) / DIM; // Size the scratchpad to fit sp_matrices matrices
+static const uint32_t accum_rows = ACC_ROWS; // Number of systolic array rows in the accumulator
+static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the scratchpad/accumulator
 
 #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
 #define dprintf(...) printf(__VA_ARGS__)
@@ -41,9 +37,9 @@ struct gemmini_state_t
   reg_t load_scale;
 
   bool enable;
-  std::vector<std::vector<input_t>> *spad; // Scratchpad constructed as systolic array rows
-  std::vector<std::vector<accum_t>> *pe_state; // Stores each PE's internal accumulator state
-  std::vector<std::vector<accum_t>> *accumulator;
+  std::vector<std::vector<elem_t>> *spad; // Scratchpad constructed as systolic array rows
+  std::vector<std::vector<acc_t>> *pe_state; // Stores each PE's internal accumulator state
+  std::vector<std::vector<acc_t>> *accumulator;
 };
 
 class gemmini_t : public rocc_t
@@ -74,10 +70,10 @@ private:
   const unsigned flush_funct = 7;
 
   bool debug;
-  input_t apply_activation(input_t value);
+  elem_t apply_activation(elem_t value);
 
   template <class T>
-  T rounding_saturating_shift(accum_t value, uint64_t shift);
+  T rounding_saturating_shift(acc_t value, uint64_t shift);
 
   template <class T>
   T read_from_dram(reg_t addr);
@@ -85,8 +81,8 @@ private:
   template <class T>
   void write_to_dram(reg_t addr, T data);
 
-  load_scale_t_bits load_scale_t_to_load_scale_t_bits(load_scale_t scale);
-  load_scale_t load_scale_t_bits_to_load_scale_t(load_scale_t_bits bits);
+  scale_t_bits scale_t_to_scale_t_bits(scale_t scale);
+  scale_t scale_t_bits_to_scale_t(scale_t_bits bits);
 };
 
 #endif
