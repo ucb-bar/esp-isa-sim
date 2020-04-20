@@ -83,6 +83,13 @@ private:
   template <class T>
   void write_to_dram(reg_t addr, T data);
 
+#ifdef ELEM_T_IS_FLOAT
+  elem_t elem_t_bits_to_elem_t(elem_t_bits x);
+  elem_t_bits elem_t_to_elem_t_bits(elem_t x);
+  acc_t acc_t_bits_to_acc_t(acc_t_bits x);
+  acc_t_bits acc_t_to_acc_t_bits(acc_t x);
+#endif
+
 #if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
   scale_t_bits scale_t_to_scale_t_bits(scale_t scale);
   scale_t scale_t_bits_to_scale_t(scale_t_bits bits);

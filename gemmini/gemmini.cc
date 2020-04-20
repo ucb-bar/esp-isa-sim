@@ -75,7 +75,11 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 
       if (accumulator) {
           auto const dram_byte_addr = dram_row_addr + col*sizeof(acc_t);
+#ifdef ELEM_T_IS_FLOAT
+          auto value = acc_t_bits_to_acc_t(read_from_dram<acc_t_bits>(dram_byte_addr));
+#else
           auto value = read_from_dram<acc_t>(dram_byte_addr);
+#endif
 #ifdef HAS_MVIN_ACC_SCALE
           gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
 #else
@@ -84,7 +88,11 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
           dprintf("%d ", gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col));
       } else {
           auto const dram_byte_addr = dram_row_addr + col*sizeof(elem_t);
+#ifdef ELEM_T_IS_FLOAT
+          auto value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_byte_addr));
+#else
           auto value = read_from_dram<elem_t>(dram_byte_addr);
+#endif
 #ifdef HAS_MVIN_SCALE
           gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
 #else
@@ -114,12 +122,20 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
         elem_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
         auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
+#ifdef ELEM_T_IS_FLOAT
+        write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(activated));
+#else
         write_to_dram<elem_t>(dram_byte_addr, activated);
+#endif
         dprintf("%d ", activated);
       } else { // Scratchpad, write to DRAM directly
         auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
         elem_t value = gemmini_state.spad->at(base_row_addr + i).at(j);
+#ifdef ELEM_T_IS_FLOAT
+        write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(value));
+#else
         write_to_dram<elem_t>(dram_byte_addr, value);
+#endif
         dprintf("%d ", value);
       }
     }
@@ -368,6 +384,7 @@ elem_t gemmini_t::apply_activation(elem_t value) {
 
 template <class T>
 T gemmini_t::rounding_saturating_shift(acc_t value, uint64_t shift) {
+#ifndef ELEM_T_IS_FLOAT
   // Rounding right shift equation: https://riscv.github.io/documents/riscv-v-spec/#_vector_fixed_point_rounding_mode_register_vxrm
   int r = (shift == 0 ? 0 : ((value >> (shift-1)) & 1)) &
        (((shift <= 1 ? 0 : (value & ((1 << (shift-1)) - 1))) != 0) | ((value >> shift) & 1));
@@ -378,4 +395,50 @@ T gemmini_t::rounding_saturating_shift(acc_t value, uint64_t shift) {
   auto elem_t_min = std::numeric_limits<T>::min();
   int64_t elem = shifted > elem_t_max ? elem_t_max : (shifted < elem_t_min ? elem_t_min : shifted);
   return static_cast<T>(elem);
+#else
+  return value / (1 << shift);
+#endif
 }
+
+#ifdef ELEM_T_IS_FLOAT
+elem_t gemmini_t::elem_t_bits_to_elem_t(elem_t_bits x) {
+  union {
+    elem_t_bits b;
+    elem_t f;
+  } un;
+
+  un.b = x;
+  return un.f;
+}
+
+elem_t_bits gemmini_t::elem_t_to_elem_t_bits(elem_t x) {
+  union {
+    elem_t_bits b;
+    elem_t f;
+  } un;
+
+  un.f = x;
+  return un.b;
+}
+
+acc_t gemmini_t::acc_t_bits_to_acc_t(acc_t_bits x) {
+  union {
+    acc_t_bits b;
+    acc_t f;
+  } un;
+
+  un.b = x;
+  return un.f;
+}
+
+acc_t_bits gemmini_t::acc_t_to_acc_t_bits(acc_t x) {
+  union {
+    acc_t_bits b;
+    acc_t f;
+  } un;
+
+  un.f = x;
+  return un.b;
+}
+#endif
+
