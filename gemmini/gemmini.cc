@@ -85,7 +85,11 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 #else
           gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col) = value;
 #endif
+#ifdef ELEM_T_IS_FLOAT
+          dprintf("%f ", gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col));
+#else
           dprintf("%d ", gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col));
+#endif
       } else {
           auto const dram_byte_addr = dram_row_addr + col*sizeof(elem_t);
 #ifdef ELEM_T_IS_FLOAT
@@ -98,7 +102,12 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 #else
           gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col) = value;
 #endif
+#ifdef ELEM_T_IS_FLOAT
+          dprintf("%f ", gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col));
+#else
           dprintf("%d ", gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col));
+#endif
+
       }
     }
     dprintf("\n");
@@ -124,19 +133,21 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
         auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
 #ifdef ELEM_T_IS_FLOAT
         write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(activated));
+        dprintf("%f ", activated);
 #else
         write_to_dram<elem_t>(dram_byte_addr, activated);
-#endif
         dprintf("%d ", activated);
+#endif
       } else { // Scratchpad, write to DRAM directly
         auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
         elem_t value = gemmini_state.spad->at(base_row_addr + i).at(j);
 #ifdef ELEM_T_IS_FLOAT
         write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(value));
+        dprintf("%f ", value);
 #else
         write_to_dram<elem_t>(dram_byte_addr, value);
-#endif
         dprintf("%d ", value);
+#endif
       }
     }
     dprintf("\n");
@@ -204,6 +215,7 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
     dprintf("GEMMINI: config_mvin - set load stride from %lu to %lu\n", gemmini_state.load_stride, rs2);
     gemmini_state.load_stride = rs2;
 #if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
+    dprintf("GEMMINI: config_mvin - set load scale from %lu to %lu\n", gemmini_state.load_scale, scale_t_bits_to_scale_t(rs1 >> 32));
     gemmini_state.load_scale = scale_t_bits_to_scale_t(rs1 >> 32);
 #endif
   } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
@@ -245,7 +257,11 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
           gemmini_state.pe_state->at(i).at(j) = 0;
         }
 
+#ifdef ELEM_T_IS_FLOAT
+        dprintf("%f ", gemmini_state.pe_state->at(i).at(j));
+#else
         dprintf("%d ", gemmini_state.pe_state->at(i).at(j));
+#endif
       }
       dprintf("\n");
     }
@@ -284,7 +300,11 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   dprintf("GEMMINI: compute - PEs after matmul:\n");
   for (size_t i = 0; i < DIM; ++i) {
     for (size_t j = 0; j < DIM; ++j) {
+#ifdef ELEM_T_IS_FLOAT
+      dprintf("%f ", gemmini_state.pe_state->at(i).at(j));
+#else
       dprintf("%d ", gemmini_state.pe_state->at(i).at(j));
+#endif
     }
     dprintf("\n");
   }
@@ -308,14 +328,22 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
           } else { // Overwrite
             gemmini_state.accumulator->at(base_sp_addr + i).at(j) = shifted;
           }
+#ifdef ELEM_T_IS_FLOAT
+          dprintf("%f ", gemmini_state.accumulator->at(base_sp_addr + i).at(j));
+#else
           dprintf("%d ", gemmini_state.accumulator->at(base_sp_addr + i).at(j));
+#endif
         } else { // Move to scratchpad, apply activation along the way
           elem_t shifted = gemmini_state.mode == gemmini_state_t::OS ?
                              rounding_saturating_shift<elem_t>(value, gemmini_state.sys_shift) :
                              rounding_saturating_shift<elem_t>(value, 0);
           elem_t activated = apply_activation(shifted);
           gemmini_state.spad->at(base_sp_addr + i).at(j) = activated;
+#ifdef ELEM_T_IS_FLOAT
+          dprintf("%f ", gemmini_state.spad->at(base_sp_addr + i).at(j));
+#else
           dprintf("%d ", gemmini_state.spad->at(base_sp_addr + i).at(j));
+#endif
         }
       }
       dprintf("\n");
