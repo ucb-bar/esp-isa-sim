@@ -35,7 +35,7 @@ struct gemmini_state_t
   reg_t load_stride;
   reg_t store_stride;
 #ifdef HAS_MVIN_SCALE
-  reg_t load_scale;
+  scale_t load_scale;
 #endif
 
   bool enable;
