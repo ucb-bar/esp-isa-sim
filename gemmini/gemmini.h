@@ -37,6 +37,7 @@ struct gemmini_state_t
 #ifdef HAS_MVIN_SCALE
   scale_t load_scale;
 #endif
+  uint16_t a_stride;
 
   bool enable;
   std::vector<std::vector<elem_t>> *spad; // Scratchpad constructed as systolic array rows

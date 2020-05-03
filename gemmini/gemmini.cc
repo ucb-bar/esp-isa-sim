@@ -64,7 +64,7 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
   auto const cols = (sp_addr >> addr_len) & 0xFFFF;
   auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
 
-  dprintf("GEMMINI: mvin - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, dram_addr, sp_addr);
+  dprintf("GEMMINI: mvin - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, dram_addr, sp_addr & 0xFFFFFFFF);
 
   for (size_t row = 0; row < rows; ++row) {
     auto const dram_row_addr = dram_addr + row*gemmini_state.load_stride;
@@ -107,7 +107,6 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 #else
           dprintf("%d ", gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col));
 #endif
-
       }
     }
     dprintf("\n");
@@ -120,7 +119,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   auto const cols = (sp_addr >> addr_len) & 0xFFFF;
   auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
 
-  dprintf("GEMMINI: mvout - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, base_row_addr, dram_addr);
+  dprintf("GEMMINI: mvout - 0x%02lx cols and 0x%02lx rows to 0x%08lx from addr 0x%08lx\n", cols, rows, base_row_addr, dram_addr);
 
   for (size_t i = 0; i < rows; ++i) {
     auto const dram_row_addr = dram_addr + i*gemmini_state.store_stride;
@@ -172,7 +171,7 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
   if ((rs1 & 0b11) == 0) { // rs1[1:0] == 2'b00, config_ex, configure execute pipeline
     gemmini_state_t::Dataflow new_mode;
     gemmini_state_t::Activation new_act;
-    reg_t new_acc_shift, new_sys_shift, new_relu6_shift;
+    reg_t new_acc_shift, new_sys_shift, new_relu6_shift, new_a_stride;
 
     auto rs1_2 = (rs1 >> 2) & 0b1; // extract rs1[2], 0 = output stationary, 1 = weight stationary
     if (rs1_2 == 0) {
@@ -195,6 +194,7 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
     new_acc_shift = (rs1 >> 32) & 0xFFFFFFFF;
     new_sys_shift = (rs2) & 0xFFFFFFFF;
     new_relu6_shift = (rs2 >> 32) & 0xFFFFFFFF;
+    new_a_stride = (rs1 >> 16) & 0xFFFF;
 
     dprintf("GEMMINI: config_ex - set dataflow mode from %d to %d\n", gemmini_state.mode, new_mode);
     dprintf("GEMMINI: config_ex - set activation function from %d to %d\n", gemmini_state.act, new_act);
@@ -211,6 +211,7 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
     gemmini_state.acc_shift = new_acc_shift;
     gemmini_state.sys_shift = new_sys_shift;
     gemmini_state.relu6_shift = new_relu6_shift;
+    gemmini_state.a_stride = new_a_stride;
   } else if ((rs1 & 0b11) == 1) { // rs1[1:0] == 2'b01, config_mvin, configure load pipeline
     dprintf("GEMMINI: config_mvin - set load stride from %lu to %lu\n", gemmini_state.load_stride, rs2);
     gemmini_state.load_stride = rs2;
@@ -284,7 +285,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   for (size_t i = 0; i < DIM; ++i) {
     for (size_t j = 0; j < DIM; ++j) {
       for (size_t k = 0; k < DIM; ++k) {
-        const auto a = i < a_rows && k < a_cols ? gemmini_state.spad->at(a_addr_real + i).at(k) : 0;
+        const auto a = i < a_rows && k < a_cols ? gemmini_state.spad->at(a_addr_real + gemmini_state.a_stride * i).at(k) : 0;
 
         if (gemmini_state.mode == gemmini_state_t::WS) {
           results->at(i).at(j) += a * gemmini_state.pe_state->at(k).at(j);
