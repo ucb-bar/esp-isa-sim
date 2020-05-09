@@ -18,6 +18,7 @@ void gemmini_state_t::reset()
   output_sp_addr = 0;
   load_stride = DIM * sizeof(elem_t);
   store_stride = DIM * sizeof(elem_t);
+  pool_stride = 0;
   spad = new std::vector<std::vector<elem_t>>(sp_matrices*DIM, std::vector<elem_t>(DIM));
   for (size_t row = 0; row < sp_matrices*DIM; ++row) {
     for (size_t elem = 0; elem < DIM; ++elem) {
@@ -119,37 +120,93 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   auto const cols = (sp_addr >> addr_len) & 0xFFFF;
   auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
 
-  dprintf("GEMMINI: mvout - 0x%02lx cols and 0x%02lx rows to 0x%08lx from addr 0x%08lx\n", cols, rows, base_row_addr, dram_addr);
+  dprintf("GEMMINI: mvout - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, base_row_addr, dram_addr);
 
-  for (size_t i = 0; i < rows; ++i) {
-    auto const dram_row_addr = dram_addr + i*gemmini_state.store_stride;
-    for (size_t j = 0; j < cols; ++j) {
-      if (accumulator) { // Apply shift and activation when moving out of accumulator
-        acc_t acc_value = gemmini_state.accumulator->at(base_row_addr + i).at(j);
-        auto shifted = rounding_saturating_shift<elem_t>(acc_value, gemmini_state.acc_shift);
-        elem_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
+  if (gemmini_state.pool_stride == 0) {
+    for (size_t i = 0; i < rows; ++i) {
+      auto const dram_row_addr = dram_addr + i*gemmini_state.store_stride;
+      for (size_t j = 0; j < cols; ++j) {
+        if (accumulator) { // Apply shift and activation when moving out of accumulator
+          acc_t acc_value = gemmini_state.accumulator->at(base_row_addr + i).at(j);
+          auto shifted = rounding_saturating_shift<elem_t>(acc_value, gemmini_state.acc_shift);
+          elem_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
-        auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
+          auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
 #ifdef ELEM_T_IS_FLOAT
-        write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(activated));
-        dprintf("%f ", activated);
+          write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(activated));
+          dprintf("%f ", activated);
 #else
-        write_to_dram<elem_t>(dram_byte_addr, activated);
-        dprintf("%d ", activated);
+          write_to_dram<elem_t>(dram_byte_addr, activated);
+          dprintf("%d ", activated);
 #endif
-      } else { // Scratchpad, write to DRAM directly
-        auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
-        elem_t value = gemmini_state.spad->at(base_row_addr + i).at(j);
+        } else { // Scratchpad, write to DRAM directly
+          auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
+          elem_t value = gemmini_state.spad->at(base_row_addr + i).at(j);
 #ifdef ELEM_T_IS_FLOAT
-        write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(value));
-        dprintf("%f ", value);
+          write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(value));
+          dprintf("%f ", value);
 #else
-        write_to_dram<elem_t>(dram_byte_addr, value);
-        dprintf("%d ", value);
+          write_to_dram<elem_t>(dram_byte_addr, value);
+          dprintf("%d ", value);
 #endif
+        }
+      }
+      dprintf("\n");
+    }
+  } else {
+    // Perform pooling
+    auto const pool_stride = gemmini_state.pool_stride;
+    auto const pool_size = gemmini_state.pool_size;
+    auto const pool_out_dim = gemmini_state.pool_out_dim;
+    auto const porows = gemmini_state.pool_porows;
+    auto const pocols = gemmini_state.pool_pocols;
+    auto const orows = gemmini_state.pool_orows;
+    auto const ocols = gemmini_state.pool_ocols;
+    auto const plpad = gemmini_state.pool_lpad;
+    auto const pupad = gemmini_state.pool_upad;
+    auto const channels = cols;
+
+    for (int porow = 0; porow < porows; porow++) {
+      for (int pocol = 0; pocol < pocols; pocol++) {
+        for (int poch = 0; poch < channels; poch++) {
+          elem_t value = elem_t_min;
+
+          for (int wrow = 0; wrow < pool_size; wrow++) {
+            for (int wcol = 0; wcol < pool_size; wcol++) {
+
+              const int orow = porow * pool_stride + wrow - pupad;
+              const int ocol = pocol * pool_stride + wcol - plpad;
+
+              const int row_addr = base_row_addr + orow*ocols + ocol;
+
+              elem_t elem;
+
+              if (orow < 0 || ocol < 0 || orow >= orows || ocol >= ocols) {
+                elem = 0;
+              } else if (accumulator) {
+                acc_t acc_value = gemmini_state.accumulator->at(row_addr).at(poch);
+                auto shifted = rounding_saturating_shift<elem_t>(acc_value, gemmini_state.acc_shift);
+                elem = apply_activation(shifted); // Activation is always applied in either WS/OS mode
+              } else {
+                elem = gemmini_state.spad->at(row_addr).at(poch);
+              }
+
+              if (elem > value) {
+                value = elem;
+              }
+            }
+          }
+
+          auto const dram_byte_addr = dram_addr + (porow * pool_out_dim + pocol) * gemmini_state.store_stride + poch * sizeof(elem_t);
+
+#ifdef ELEM_T_IS_FLOAT
+          write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(value));
+#else
+          write_to_dram<elem_t>(dram_byte_addr, value);
+#endif
+        }
       }
     }
-    dprintf("\n");
   }
 }
 
@@ -222,6 +279,30 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
   } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
     dprintf("GEMMINI: config_mvout - set store stride from %lu to %lu\n", gemmini_state.store_stride, rs2);
     gemmini_state.store_stride = rs2;
+    gemmini_state.pool_stride = (rs1 >> 4) & 0x3;
+    gemmini_state.pool_size = (rs1 >> 6) & 0x3;
+    gemmini_state.pool_upad = (rs1 >> 8) & 0x3;
+    gemmini_state.pool_lpad = (rs1 >> 10) & 0x3;
+    gemmini_state.pool_out_dim = (rs1 >> 24) & 0xFF;
+    gemmini_state.pool_porows = (rs1 >> 32) & 0xFF;
+    gemmini_state.pool_pocols = (rs1 >> 40) & 0xFF;
+    gemmini_state.pool_orows = (rs1 >> 48) & 0xFF;
+    gemmini_state.pool_ocols = (rs1 >> 56) & 0xFF;
+
+    if (gemmini_state.pool_stride == 0) {
+        dprintf("GEMMINI: config_mvout - no pooling\n");
+    } else {
+        dprintf("GEMMINI: config_mvout - set pool_stride to %u\n", gemmini_state.pool_stride);
+        dprintf("GEMMINI: config_mvout - set pool_size to %u\n", gemmini_state.pool_size);
+        dprintf("GEMMINI: config_mvout - set pool_upad to %u\n", gemmini_state.pool_upad);
+        dprintf("GEMMINI: config_mvout - set pool_lpad to %u\n", gemmini_state.pool_lpad);
+        dprintf("GEMMINI: config_mvout - set pool_out_dim to %u\n", gemmini_state.pool_out_dim);
+        dprintf("GEMMINI: config_mvout - set pool_porows to %u\n", gemmini_state.pool_porows);
+        dprintf("GEMMINI: config_mvout - set pool_pocols to %u\n", gemmini_state.pool_pocols);
+        dprintf("GEMMINI: config_mvout - set pool_orows to %u\n", gemmini_state.pool_orows);
+        dprintf("GEMMINI: config_mvout - set pool_ocols to %u\n", gemmini_state.pool_ocols);
+        dprintf("GEMMINI: config_mvout - rs1 is %llx\n", rs1);
+    }
   }
 }
 

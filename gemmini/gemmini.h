@@ -12,6 +12,7 @@ static const uint32_t sp_matrices = (BANK_NUM * BANK_ROWS) / DIM; // Size the sc
 static const uint32_t accum_rows = ACC_ROWS; // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the scratchpad/accumulator
 
+// #define RISCV_ENABLE_GEMMINI_COMMITLOG
 #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
 #define dprintf(...) printf(__VA_ARGS__)
 #else
@@ -38,6 +39,15 @@ struct gemmini_state_t
   scale_t load_scale;
 #endif
   uint16_t a_stride;
+  uint8_t pool_stride;
+  uint8_t pool_size;
+  uint8_t pool_out_dim;
+  uint8_t pool_porows;
+  uint8_t pool_pocols;
+  uint8_t pool_orows;
+  uint8_t pool_ocols;
+  uint8_t pool_lpad;
+  uint8_t pool_upad;
 
   bool enable;
   std::vector<std::vector<elem_t>> *spad; // Scratchpad constructed as systolic array rows
