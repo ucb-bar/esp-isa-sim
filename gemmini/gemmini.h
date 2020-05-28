@@ -12,7 +12,6 @@ static const uint32_t sp_matrices = (BANK_NUM * BANK_ROWS) / DIM; // Size the sc
 static const uint32_t accum_rows = ACC_ROWS; // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the scratchpad/accumulator
 
-// #define RISCV_ENABLE_GEMMINI_COMMITLOG
 #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
 #define dprintf(...) printf(__VA_ARGS__)
 #else
