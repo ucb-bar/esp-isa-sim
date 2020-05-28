@@ -366,12 +366,18 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   for (size_t i = 0; i < DIM; ++i) {
     for (size_t j = 0; j < DIM; ++j) {
       for (size_t k = 0; k < DIM; ++k) {
-        const auto a = i < a_rows && k < a_cols ? gemmini_state.spad->at(a_addr_real + gemmini_state.a_stride * i).at(k) : 0;
+        elem_t a;
+        if (~a_addr_real != 0) {
+            a = i < a_rows && k < a_cols ? gemmini_state.spad->at(a_addr_real + gemmini_state.a_stride * i).at(k) : 0;
+        }
 
         if (gemmini_state.mode == gemmini_state_t::WS) {
           results->at(i).at(j) += a * gemmini_state.pe_state->at(k).at(j);
         } else {
-          const auto b = k < bd_rows && j < bd_cols ? gemmini_state.spad->at(bd_addr_real + k).at(j) : 0;
+          elem_t b = 0;
+          if (~bd_addr_real != 0) {
+            b = k < bd_rows && j < bd_cols ? gemmini_state.spad->at(bd_addr_real + k).at(j) : 0;
+          }
 
           gemmini_state.pe_state->at(i).at(j) += a * b;
         }
