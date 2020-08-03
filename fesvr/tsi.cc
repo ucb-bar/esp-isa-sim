@@ -16,6 +16,12 @@ void tsi_t::host_thread(void *arg)
 tsi_t::tsi_t(int argc, char** argv) : htif_t(argc, argv)
 {
   target = context_t::current();
+  loadmem_addr = 0;
+  for (int i = 1; i < argc; i++) {
+      std::string arg(argv[i]);
+      if (arg.find("+loadmem_addr=") == 0)
+          loadmem_addr = stol(arg.substr(strlen("+loadmem_addr=")), NULL, 16);
+  }
   host.init(host_thread, this);
 }
 
@@ -112,4 +118,12 @@ void tsi_t::tick(bool out_valid, uint32_t out_bits, bool in_ready)
 
   if (in_valid() && in_ready)
     in_data.pop_front();
+}
+
+bool tsi_t::is_address_preloaded(addr_t taddr, size_t len)
+{
+  if(loadmem_addr != 0)
+    return taddr > loadmem_addr;
+  else
+    return false;
 }
