@@ -42,11 +42,16 @@ class tsi_t : public htif_t
 
   int get_ipi_addrs(addr_t *addrs);
 
+  bool is_address_preloaded(addr_t taddr, size_t len) override;
+
  private:
   context_t host;
   context_t* target;
   std::deque<uint32_t> in_data;
   std::deque<uint32_t> out_data;
+
+  addr_t loadmem_addr;
+  bool loadmem;
 
   void push_addr(addr_t addr);
   void push_len(addr_t len);
