@@ -51,6 +51,7 @@ class tsi_t : public htif_t
   std::deque<uint32_t> out_data;
 
   addr_t loadmem_addr;
+  bool loadmem;
 
   void push_addr(addr_t addr);
   void push_len(addr_t len);
