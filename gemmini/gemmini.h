@@ -90,13 +90,14 @@ private:
   //==========================================================================
   // gemmini-cisc opcodes
   //==========================================================================
-  const unsigned config_addr_AB_funct        = 10;
-  const unsigned config_addr_CD_funct        = 11;
-  const unsigned config_size0_funct          = 12;
-  const unsigned config_size1_funct          = 13;
-  const unsigned config_repeating_bias_funct = 14;
-  const unsigned config_reset_funct          = 15;
-  const unsigned compute_cisc_funct          = 16;
+  const unsigned config_cisc_setmode_funct   = 10;
+  const unsigned config_addr_AB_funct        = 11;
+  const unsigned config_addr_CD_funct        = 12;
+  const unsigned config_size0_funct          = 13;
+  const unsigned config_size1_funct          = 14;
+  const unsigned config_repeating_bias_funct = 15;
+  const unsigned config_reset_funct          = 16;
+  const unsigned compute_cisc_funct          = 17;
   //==========================================================================
 
   bool debug;
