@@ -47,6 +47,8 @@ struct gemmini_state_t
   uint8_t pool_ocols;
   uint8_t pool_lpad;
   uint8_t pool_upad;
+  bool a_transpose;
+  bool b_transpose;
 
   bool enable;
   std::vector<std::vector<elem_t>> *spad; // Scratchpad constructed as systolic array rows
@@ -70,7 +72,7 @@ public:
   void mvin(reg_t dram_addr, reg_t sp_addr);
   void mvout(reg_t dram_addr, reg_t sp_addr);
   void preload(reg_t bd_addr, reg_t c_addr);
-  void setmode(reg_t rs1, reg_t rs2);
+  void config(reg_t rs1, reg_t rs2);
   void compute(reg_t a_addr, reg_t bd_addr, bool preload);
   void compute_cisc();
 
@@ -79,7 +81,7 @@ private:
   reg_t cause;
   reg_t aux;
 
-  const unsigned setmode_funct = 0;
+  const unsigned config_funct = 0;
   const unsigned mvin_funct = 2;
   const unsigned mvout_funct = 3;
   const unsigned compute_preloaded_funct = 4;

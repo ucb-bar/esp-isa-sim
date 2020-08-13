@@ -266,11 +266,11 @@ void gemmini_t::preload(reg_t bd_addr, reg_t c_addr) {
             gemmini_state.output_sp_addr, gemmini_state.preload_sp_addr);
 }
 
-void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
+void gemmini_t::config(reg_t rs1, reg_t rs2) {
   if ((rs1 & 0b11) == 0) { // rs1[1:0] == 2'b00, config_ex, configure execute pipeline
     gemmini_state_t::Dataflow new_mode;
     gemmini_state_t::Activation new_act;
-    reg_t new_acc_shift, new_sys_shift, new_relu6_shift, new_a_stride;
+    reg_t new_acc_shift, new_sys_shift, new_relu6_shift, new_a_stride, new_a_transpose, new_b_transpose;
 
     auto rs1_2 = (rs1 >> 2) & 0b1; // extract rs1[2], 0 = output stationary, 1 = weight stationary
     if (rs1_2 == 0) {
@@ -294,6 +294,8 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
     new_sys_shift = (rs2) & 0xFFFFFFFF;
     new_relu6_shift = (rs2 >> 32) & 0xFFFFFFFF;
     new_a_stride = (rs1 >> 16) & 0xFFFF;
+    new_a_transpose = (rs1 >> 8) & 0x1;
+    new_b_transpose = (rs1 >> 9) & 0x1;
 
     dprintf("GEMMINI: config_ex - set dataflow mode from %d to %d\n", gemmini_state.mode, new_mode);
     dprintf("GEMMINI: config_ex - set activation function from %d to %d\n", gemmini_state.act, new_act);
@@ -307,10 +309,16 @@ void gemmini_t::setmode(reg_t rs1, reg_t rs2) {
     assert(new_acc_shift >= 0 && new_acc_shift < sizeof(acc_t)*8);
     assert(new_sys_shift >= 0 && new_sys_shift < sizeof(output_t)*8);
     assert(new_relu6_shift >= 0);
+
     gemmini_state.acc_shift = new_acc_shift;
     gemmini_state.sys_shift = new_sys_shift;
     gemmini_state.relu6_shift = new_relu6_shift;
     gemmini_state.a_stride = new_a_stride;
+    gemmini_state.a_transpose = new_a_transpose;
+    gemmini_state.b_transpose = new_b_transpose;
+
+    assert(!(new_mode == gemmini_state_t::OS && !new_a_transpose && new_b_transpose) && !(new_mode == gemmini_state_t::WS && new_a_transpose && new_b_transpose));
+
   } else if ((rs1 & 0b11) == 1) { // rs1[1:0] == 2'b01, config_mvin, configure load pipeline
     dprintf("GEMMINI: config_mvin - set load stride from %lu to %lu\n", gemmini_state.load_stride, rs2);
     gemmini_state.load_stride = rs2;
@@ -410,15 +418,24 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
       for (size_t k = 0; k < DIM; ++k) {
         elem_t a;
         if (~a_addr_real != 0) {
-            a = i < a_rows && k < a_cols ? gemmini_state.spad->at(a_addr_real + gemmini_state.a_stride * i).at(k) : 0;
+            const size_t r = gemmini_state.a_transpose ? k : gemmini_state.a_stride * i;
+            const size_t c = gemmini_state.a_transpose ? gemmini_state.a_stride * i : k;
+
+            a = i < a_rows && k < a_cols ? gemmini_state.spad->at(a_addr_real + r).at(c) : 0;
         }
 
         if (gemmini_state.mode == gemmini_state_t::WS) {
-          results->at(i).at(j) += a * gemmini_state.pe_state->at(k).at(j);
+          const size_t r = gemmini_state.b_transpose ? j : k;
+          const size_t c = gemmini_state.b_transpose ? k : j;
+
+          results->at(i).at(j) += a * gemmini_state.pe_state->at(r).at(c);
         } else {
           elem_t b = 0;
           if (~bd_addr_real != 0) {
-            b = k < bd_rows && j < bd_cols ? gemmini_state.spad->at(bd_addr_real + k).at(j) : 0;
+            const size_t r = gemmini_state.b_transpose ? j : k;
+            const size_t c = gemmini_state.b_transpose ? k : j;
+
+            b = k < bd_rows && j < bd_cols ? gemmini_state.spad->at(bd_addr_real + r).at(c) : 0;
           }
 
           gemmini_state.pe_state->at(i).at(j) += a * b;
@@ -544,8 +561,8 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     mvout(xs1, xs2);
   else if (insn.funct == preload_funct)
     preload(xs1, xs2);
-  else if (insn.funct == setmode_funct)
-    setmode(xs1, xs2);
+  else if (insn.funct == config_funct)
+    config(xs1, xs2);
   else if (insn.funct == compute_preloaded_funct)
     compute(xs1, xs2, true);
   else if (insn.funct == compute_accumulated_funct)
