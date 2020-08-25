@@ -36,6 +36,7 @@ void gemmini_state_t::reset()
   // cisc reset
   a_addr = b_addr = c_addr = d_addr = 0;
   m = n = k = 0;
+  repeating_bias = false;
 
   printf("Gemmini extension configured with:\n");
   printf("    dim = %u\n", DIM);
@@ -573,6 +574,9 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   //==========================================================================
   // gemmini-cisc opcodes
   //==========================================================================
+  else if (insn.funct == config_cisc_ex_funct) {
+    config(xs1, xs2);
+  }
   else if (insn.funct == config_addr_AB_funct) {
     gemmini_state.a_addr = xs1;
     gemmini_state.b_addr = xs2;

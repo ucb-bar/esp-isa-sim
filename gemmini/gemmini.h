@@ -92,7 +92,7 @@ private:
   //==========================================================================
   // gemmini-cisc opcodes
   //==========================================================================
-  const unsigned config_cisc_setmode_funct   = 10;
+  const unsigned config_cisc_ex_funct        = 10;
   const unsigned config_addr_AB_funct        = 11;
   const unsigned config_addr_CD_funct        = 12;
   const unsigned config_size0_funct          = 13;
