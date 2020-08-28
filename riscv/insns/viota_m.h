@@ -7,6 +7,10 @@ reg_t rd_num = insn.rd();
 reg_t rs1_num = insn.rs1();
 reg_t rs2_num = insn.rs2();
 require(P.VU.vstart == 0);
+require(!is_overlapped(rd_num, P.VU.vlmul, rs2_num, 1));
+if (insn.v_vm() == 0)
+  require(!is_overlapped(rd_num, P.VU.vlmul, 0, 1));
+require((rd_num & (P.VU.vlmul - 1)) == 0);
 
 int cnt = 0;
 for (reg_t i = 0; i < vl; ++i) {
@@ -27,19 +31,19 @@ for (reg_t i = 0; i < vl; ++i) {
   bool use_ori = (insn.v_vm() == 0) && !do_mask;
   switch (sew) {
   case e8:
-    P.VU.elt<uint8_t>(rd_num, i) = use_ori ?
+    P.VU.elt<uint8_t>(rd_num, i, true) = use_ori ?
                                    P.VU.elt<uint8_t>(rd_num, i) : cnt;
     break;
   case e16:
-    P.VU.elt<uint16_t>(rd_num, i) = use_ori ?
+    P.VU.elt<uint16_t>(rd_num, i, true) = use_ori ?
                                     P.VU.elt<uint16_t>(rd_num, i) : cnt;
     break;
   case e32:
-    P.VU.elt<uint32_t>(rd_num, i) = use_ori ?
+    P.VU.elt<uint32_t>(rd_num, i, true) = use_ori ?
                                     P.VU.elt<uint32_t>(rd_num, i) : cnt;
     break;
   default:
-    P.VU.elt<uint64_t>(rd_num, i) = use_ori ?
+    P.VU.elt<uint64_t>(rd_num, i, true) = use_ori ?
                                     P.VU.elt<uint64_t>(rd_num, i) : cnt;
     break;
   }
@@ -49,4 +53,3 @@ for (reg_t i = 0; i < vl; ++i) {
   }
 }
 
-VI_TAIL_ZERO(1);
