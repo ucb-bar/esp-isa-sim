@@ -1,4 +1,6 @@
 // vmerge.vvm vd, vs2, vs1
+require_vector;
+VI_CHECK_SSS(true);
 VI_VVXI_MERGE_LOOP
 ({
   int midx = (P.VU.vmlen * i) / 64;

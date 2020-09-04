@@ -30,8 +30,8 @@ struct : public arg_t {
 class disasm_insn_t
 {
  public:
-  disasm_insn_t(const char* name, uint64_t match, uint64_t mask,
-                const std::vector<const arg_t*>& args)
+  NOINLINE disasm_insn_t(const char* name, uint64_t match, uint64_t mask,
+                         const std::vector<const arg_t*>& args)
     : match(match), mask(mask), args(args), name(strdup(name)) {}
   ~disasm_insn_t() { free(const_cast<char *>(name)); }
 
