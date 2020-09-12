@@ -425,9 +425,9 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
                   rounding_saturating_shift<output_t>(value, gemmini_state.sys_shift) :
                   rounding_saturating_shift<output_t>(value, 0);
           if (acc_accum) {
-            gemmini_state.accumulator.at(base_sp_addr + i).at(j) += shifted;
+            gemmini_state.accumulator.at(base_sp_addr + i).at(j) += value;
           } else { // Overwrite
-            gemmini_state.accumulator.at(base_sp_addr + i).at(j) = shifted;
+            gemmini_state.accumulator.at(base_sp_addr + i).at(j) = value;
           }
 #ifdef ELEM_T_IS_FLOAT
           dprintf("%f ", gemmini_state.accumulator.at(base_sp_addr + i).at(j));
