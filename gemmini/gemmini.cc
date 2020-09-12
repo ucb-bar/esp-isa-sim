@@ -19,19 +19,15 @@ void gemmini_state_t::reset()
   load_stride = DIM * sizeof(elem_t);
   store_stride = DIM * sizeof(elem_t);
   pool_stride = 0;
-  spad = new std::vector<std::vector<elem_t>>(sp_matrices*DIM, std::vector<elem_t>(DIM));
-  for (size_t row = 0; row < sp_matrices*DIM; ++row) {
-    for (size_t elem = 0; elem < DIM; ++elem) {
-      spad->at(row).at(elem) = 0;
-    }
-  }
-  pe_state = new std::vector<std::vector<acc_t>>(DIM, std::vector<acc_t>(DIM));
-  accumulator = new std::vector<std::vector<acc_t>>(accum_rows, std::vector<acc_t>(DIM));
-  for (size_t row = 0; row < accum_rows; ++row) {
-    for (size_t elem = 0; elem < DIM; ++elem) {
-      accumulator->at(row).at(elem) = 0;
-    }
-  }
+
+  spad.clear();
+  spad.resize(sp_matrices*DIM, std::vector<elem_t>(DIM, 0));
+
+  pe_state.clear();
+  pe_state.resize(DIM, std::vector<acc_t>(DIM));
+
+  accumulator.clear();
+  accumulator.resize(accum_rows, std::vector<acc_t>(DIM, 0));
 
   printf("Gemmini extension configured with:\n");
   printf("    dim = %u\n", DIM);
@@ -82,14 +78,14 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
           auto value = read_from_dram<acc_t>(dram_byte_addr);
 #endif
 #ifdef HAS_MVIN_ACC_SCALE
-          gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
+          gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
 #else
-          gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col) = value;
+          gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) = value;
 #endif
 #ifdef ELEM_T_IS_FLOAT
-          dprintf("%f ", gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col));
+          dprintf("%f ", gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col));
 #else
-          dprintf("%d ", gemmini_state.accumulator->at(base_row_addr + row + block*DIM).at(spad_col));
+          dprintf("%d ", gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col));
 #endif
       } else {
           auto const dram_byte_addr = dram_row_addr + col*sizeof(elem_t);
@@ -99,14 +95,14 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
           auto value = read_from_dram<elem_t>(dram_byte_addr);
 #endif
 #ifdef HAS_MVIN_SCALE
-          gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
+          gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
 #else
-          gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col) = value;
+          gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col) = value;
 #endif
 #ifdef ELEM_T_IS_FLOAT
-          dprintf("%f ", gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col));
+          dprintf("%f ", gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col));
 #else
-          dprintf("%d ", gemmini_state.spad->at(base_row_addr + row + block*DIM).at(spad_col));
+          dprintf("%d ", gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col));
 #endif
       }
     }
@@ -127,7 +123,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
       auto const dram_row_addr = dram_addr + i*gemmini_state.store_stride;
       for (size_t j = 0; j < cols; ++j) {
         if (accumulator) { // Apply shift and activation when moving out of accumulator
-          acc_t acc_value = gemmini_state.accumulator->at(base_row_addr + i).at(j);
+          acc_t acc_value = gemmini_state.accumulator.at(base_row_addr + i).at(j);
           auto shifted = rounding_saturating_shift<elem_t>(acc_value, gemmini_state.acc_shift);
           elem_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
@@ -141,7 +137,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
 #endif
         } else { // Scratchpad, write to DRAM directly
           auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
-          elem_t value = gemmini_state.spad->at(base_row_addr + i).at(j);
+          elem_t value = gemmini_state.spad.at(base_row_addr + i).at(j);
 #ifdef ELEM_T_IS_FLOAT
           write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(value));
           dprintf("%f ", value);
@@ -184,11 +180,11 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
               if (orow < 0 || ocol < 0 || orow >= orows || ocol >= ocols) {
                 elem = 0;
               } else if (accumulator) {
-                acc_t acc_value = gemmini_state.accumulator->at(row_addr).at(poch);
+                acc_t acc_value = gemmini_state.accumulator.at(row_addr).at(poch);
                 auto shifted = rounding_saturating_shift<elem_t>(acc_value, gemmini_state.acc_shift);
                 elem = apply_activation(shifted); // Activation is always applied in either WS/OS mode
               } else {
-                elem = gemmini_state.spad->at(row_addr).at(poch);
+                elem = gemmini_state.spad.at(row_addr).at(poch);
               }
 
               if (elem > value) {
@@ -341,16 +337,16 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
         // In WS mode, pe_state stores the persistent weight matrix
         if (i < gemmini_state.preload_rows && j < gemmini_state.preload_cols) {
           auto preload_value = (~gemmini_state.preload_sp_addr == 0) ? 0 :
-                  gemmini_state.spad->at(gemmini_state.preload_sp_addr + i).at(j);
-          gemmini_state.pe_state->at(i).at(j) = preload_value;
+                  gemmini_state.spad.at(gemmini_state.preload_sp_addr + i).at(j);
+          gemmini_state.pe_state.at(i).at(j) = preload_value;
         } else {
-          gemmini_state.pe_state->at(i).at(j) = 0;
+          gemmini_state.pe_state.at(i).at(j) = 0;
         }
 
 #ifdef ELEM_T_IS_FLOAT
-        dprintf("%f ", gemmini_state.pe_state->at(i).at(j));
+        dprintf("%f ", gemmini_state.pe_state.at(i).at(j));
 #else
-        dprintf("%d ", gemmini_state.pe_state->at(i).at(j));
+        dprintf("%d ", gemmini_state.pe_state.at(i).at(j));
 #endif
       }
       dprintf("\n");
@@ -360,13 +356,13 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   // Compute
   // For OS, accumulate the PE results internally in pe_state
   // For WS, allocate a new results array which won't affect pe_state, seed the results array with the bias (D) matrix
-  auto results = new std::vector<std::vector<acc_t>>(DIM, std::vector<acc_t>(DIM));
+  auto results = std::vector<std::vector<acc_t>>(DIM, std::vector<acc_t>(DIM));
   for (size_t i = 0; i < DIM; ++i) {
     for (size_t j = 0; j < DIM; ++j) {
       if (i < bd_rows && j < bd_cols) {
-        results->at(i).at(j) = (~bd_addr_real == 0) ? 0 : gemmini_state.spad->at(bd_addr_real + i).at(j);
+        results.at(i).at(j) = (~bd_addr_real == 0) ? 0 : gemmini_state.spad.at(bd_addr_real + i).at(j);
       } else {
-        results->at(i).at(j) = 0;
+        results.at(i).at(j) = 0;
       }
     }
   }
@@ -379,24 +375,24 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
             const size_t r = gemmini_state.a_transpose ? k : gemmini_state.a_stride * i;
             const size_t c = gemmini_state.a_transpose ? gemmini_state.a_stride * i : k;
 
-            a = i < a_rows && k < a_cols ? gemmini_state.spad->at(a_addr_real + r).at(c) : 0;
+            a = i < a_rows && k < a_cols ? gemmini_state.spad.at(a_addr_real + r).at(c) : 0;
         }
 
         if (gemmini_state.mode == gemmini_state_t::WS) {
           const size_t r = gemmini_state.b_transpose ? j : k;
           const size_t c = gemmini_state.b_transpose ? k : j;
 
-          results->at(i).at(j) += a * gemmini_state.pe_state->at(r).at(c);
+          results.at(i).at(j) += a * gemmini_state.pe_state.at(r).at(c);
         } else {
           elem_t b = 0;
           if (~bd_addr_real != 0) {
             const size_t r = gemmini_state.b_transpose ? j : k;
             const size_t c = gemmini_state.b_transpose ? k : j;
 
-            b = k < bd_rows && j < bd_cols ? gemmini_state.spad->at(bd_addr_real + r).at(c) : 0;
+            b = k < bd_rows && j < bd_cols ? gemmini_state.spad.at(bd_addr_real + r).at(c) : 0;
           }
 
-          gemmini_state.pe_state->at(i).at(j) += a * b;
+          gemmini_state.pe_state.at(i).at(j) += a * b;
         }
       }
     }
@@ -406,9 +402,9 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   for (size_t i = 0; i < DIM; ++i) {
     for (size_t j = 0; j < DIM; ++j) {
 #ifdef ELEM_T_IS_FLOAT
-      dprintf("%f ", gemmini_state.pe_state->at(i).at(j));
+      dprintf("%f ", gemmini_state.pe_state.at(i).at(j));
 #else
-      dprintf("%d ", gemmini_state.pe_state->at(i).at(j));
+      dprintf("%d ", gemmini_state.pe_state.at(i).at(j));
 #endif
     }
     dprintf("\n");
@@ -423,31 +419,31 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
 
     for (size_t i = 0; i < gemmini_state.output_rows; ++i) {
       for (size_t j = 0; j < gemmini_state.output_cols; ++j) {
-        acc_t value = gemmini_state.mode == gemmini_state_t::OS ? gemmini_state.pe_state->at(i).at(j) : results->at(i).at(j);
+        acc_t value = gemmini_state.mode == gemmini_state_t::OS ? gemmini_state.pe_state.at(i).at(j) : results.at(i).at(j);
         if (acc) {
           output_t shifted = gemmini_state.mode == gemmini_state_t::OS ?
                   rounding_saturating_shift<output_t>(value, gemmini_state.sys_shift) :
                   rounding_saturating_shift<output_t>(value, 0);
           if (acc_accum) {
-            gemmini_state.accumulator->at(base_sp_addr + i).at(j) += shifted;
+            gemmini_state.accumulator.at(base_sp_addr + i).at(j) += shifted;
           } else { // Overwrite
-            gemmini_state.accumulator->at(base_sp_addr + i).at(j) = shifted;
+            gemmini_state.accumulator.at(base_sp_addr + i).at(j) = shifted;
           }
 #ifdef ELEM_T_IS_FLOAT
-          dprintf("%f ", gemmini_state.accumulator->at(base_sp_addr + i).at(j));
+          dprintf("%f ", gemmini_state.accumulator.at(base_sp_addr + i).at(j));
 #else
-          dprintf("%d ", gemmini_state.accumulator->at(base_sp_addr + i).at(j));
+          dprintf("%d ", gemmini_state.accumulator.at(base_sp_addr + i).at(j));
 #endif
         } else { // Move to scratchpad, apply activation along the way
           elem_t shifted = gemmini_state.mode == gemmini_state_t::OS ?
                              rounding_saturating_shift<elem_t>(value, gemmini_state.sys_shift) :
                              rounding_saturating_shift<elem_t>(value, 0);
           elem_t activated = apply_activation(shifted);
-          gemmini_state.spad->at(base_sp_addr + i).at(j) = activated;
+          gemmini_state.spad.at(base_sp_addr + i).at(j) = activated;
 #ifdef ELEM_T_IS_FLOAT
-          dprintf("%f ", gemmini_state.spad->at(base_sp_addr + i).at(j));
+          dprintf("%f ", gemmini_state.spad.at(base_sp_addr + i).at(j));
 #else
-          dprintf("%d ", gemmini_state.spad->at(base_sp_addr + i).at(j));
+          dprintf("%d ", gemmini_state.spad.at(base_sp_addr + i).at(j));
 #endif
         }
       }
@@ -574,4 +570,3 @@ acc_t_bits gemmini_t::acc_t_to_acc_t_bits(acc_t x) {
   return un.b;
 }
 #endif
-
