@@ -12,6 +12,8 @@ static const uint32_t sp_matrices = (BANK_NUM * BANK_ROWS) / DIM; // Size the sc
 static const uint32_t accum_rows = ACC_ROWS; // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the scratchpad/accumulator
 
+// #define RISCV_ENABLE_GEMMINI_COMMITLOG
+
 #ifdef RISCV_ENABLE_GEMMINI_COMMITLOG
 #define dprintf(...) printf(__VA_ARGS__)
 #else
@@ -34,6 +36,7 @@ struct gemmini_state_t
   reg_t acc_shift, sys_shift, relu6_shift;
   reg_t load_stride;
   reg_t store_stride;
+  bool load_shrunk;
 #ifdef HAS_MVIN_SCALE
   scale_t load_scale;
 #endif
@@ -87,13 +90,19 @@ private:
   elem_t apply_activation(elem_t value);
 
   template <class T>
-  T rounding_saturating_shift(acc_t value, uint64_t shift);
+  T rounding_saturating_shift(acc_t value, int64_t shift);
 
   template <class T>
   T read_from_dram(reg_t addr);
 
   template <class T>
   void write_to_dram(reg_t addr, T data);
+
+  // template <class T>
+  // T mvin_scale_func(acc_t value, scale_t scale);
+
+  // template <class T>
+  // T mvout_scale_func(acc_t value, scale_t scale);
 
 #ifdef ELEM_T_IS_FLOAT
   elem_t elem_t_bits_to_elem_t(elem_t_bits x);
