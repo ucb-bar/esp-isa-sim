@@ -51,9 +51,10 @@ struct gemmini_state_t
   bool b_transpose;
 
   bool enable;
-  std::vector<std::vector<elem_t>> *spad; // Scratchpad constructed as systolic array rows
-  std::vector<std::vector<acc_t>> *pe_state; // Stores each PE's internal accumulator state
-  std::vector<std::vector<acc_t>> *accumulator;
+
+  std::vector<std::vector<elem_t>> spad; // Scratchpad constructed as systolic array rows
+  std::vector<std::vector<acc_t>> pe_state; // Stores each PE's internal accumulator state
+  std::vector<std::vector<acc_t>> accumulator;
 
   // cisc state
   reg_t a_addr, b_addr, c_addr, d_addr;

@@ -10,6 +10,7 @@
 #include "simif.h"
 #include "processor.h"
 #include "memtracer.h"
+#include "byteorder.h"
 #include <stdlib.h>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #define PGSHIFT 12
 const reg_t PGSIZE = 1 << PGSHIFT;
 const reg_t PGMASK = ~(PGSIZE-1);
+#define MAX_PADDR_BITS 56 // imposed by Sv39 / Sv48
 
 struct insn_fetch_t
 {
@@ -78,26 +80,38 @@ public:
 #endif
   }
 
+#ifndef RISCV_ENABLE_COMMITLOG
+# define READ_MEM(addr, size) ({})
+#else
+# define READ_MEM(addr, size) \
+  proc->state.log_mem_read.push_back(std::make_tuple(addr, 0, size));
+#endif
+
   // template for functions that load an aligned value from memory
   #define load_func(type) \
     inline type##_t load_##type(reg_t addr) { \
       if (unlikely(addr & (sizeof(type##_t)-1))) \
         return misaligned_load(addr, sizeof(type##_t)); \
       reg_t vpn = addr >> PGSHIFT; \
-      if (likely(tlb_load_tag[vpn % TLB_ENTRIES] == vpn)) \
-        return *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr); \
+      size_t size = sizeof(type##_t); \
+      if (likely(tlb_load_tag[vpn % TLB_ENTRIES] == vpn)) { \
+        if (proc) READ_MEM(addr, size); \
+        return from_le(*(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr)); \
+      } \
       if (unlikely(tlb_load_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) { \
-        type##_t data = *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr); \
+        type##_t data = from_le(*(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr)); \
         if (!matched_trigger) { \
           matched_trigger = trigger_exception(OPERATION_LOAD, addr, data); \
           if (matched_trigger) \
             throw *matched_trigger; \
         } \
+        if (proc) READ_MEM(addr, size); \
         return data; \
       } \
       type##_t res; \
       load_slow_path(addr, sizeof(type##_t), (uint8_t*)&res); \
-      return res; \
+      if (proc) READ_MEM(addr, size); \
+      return from_le(res); \
     }
 
   // load value from memory at aligned address; zero extend to register width
@@ -115,11 +129,8 @@ public:
 #ifndef RISCV_ENABLE_COMMITLOG
 # define WRITE_MEM(addr, value, size) ({})
 #else
-# define WRITE_MEM(addr, val, size) ({ \
-    proc->state.log_mem_write.addr = addr; \
-    proc->state.log_mem_write.value = val; \
-    proc->state.log_mem_write.size = size; \
-  })
+# define WRITE_MEM(addr, val, size) \
+  proc->state.log_mem_write.push_back(std::make_tuple(addr, val, size));
 #endif
 
   // template for functions that store an aligned value to memory
@@ -128,21 +139,24 @@ public:
       if (unlikely(addr & (sizeof(type##_t)-1))) \
         return misaligned_store(addr, val, sizeof(type##_t)); \
       reg_t vpn = addr >> PGSHIFT; \
-      if (likely(tlb_store_tag[vpn % TLB_ENTRIES] == vpn)) \
-        *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = val; \
+      size_t size = sizeof(type##_t); \
+      if (likely(tlb_store_tag[vpn % TLB_ENTRIES] == vpn)) { \
+        if (proc) WRITE_MEM(addr, val, size); \
+        *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = to_le(val); \
+      } \
       else if (unlikely(tlb_store_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) { \
         if (!matched_trigger) { \
           matched_trigger = trigger_exception(OPERATION_STORE, addr, val); \
           if (matched_trigger) \
             throw *matched_trigger; \
         } \
-        *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = val; \
+        if (proc) WRITE_MEM(addr, val, size); \
+        *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = to_le(val); \
       } \
-      else \
-        store_slow_path(addr, sizeof(type##_t), (const uint8_t*)&val); \
-      if (proc) { \
-        size_t size = sizeof(type##_t); \
-        WRITE_MEM(addr, val, size); \
+      else { \
+	type##_t le_val = to_le(val); \
+        store_slow_path(addr, sizeof(type##_t), (const uint8_t*)&le_val); \
+        if (proc) WRITE_MEM(addr, val, size); \
       } \
   }
 
@@ -227,21 +241,21 @@ public:
   inline icache_entry_t* refill_icache(reg_t addr, icache_entry_t* entry)
   {
     auto tlb_entry = translate_insn_addr(addr);
-    insn_bits_t insn = *(uint16_t*)(tlb_entry.host_offset + addr);
+    insn_bits_t insn = from_le(*(uint16_t*)(tlb_entry.host_offset + addr));
     int length = insn_length(insn);
 
     if (likely(length == 4)) {
-      insn |= (insn_bits_t)*(const int16_t*)translate_insn_addr_to_host(addr + 2) << 16;
+      insn |= (insn_bits_t)from_le(*(const int16_t*)translate_insn_addr_to_host(addr + 2)) << 16;
     } else if (length == 2) {
       insn = (int16_t)insn;
     } else if (length == 6) {
-      insn |= (insn_bits_t)*(const int16_t*)translate_insn_addr_to_host(addr + 4) << 32;
-      insn |= (insn_bits_t)*(const uint16_t*)translate_insn_addr_to_host(addr + 2) << 16;
+      insn |= (insn_bits_t)from_le(*(const int16_t*)translate_insn_addr_to_host(addr + 4)) << 32;
+      insn |= (insn_bits_t)from_le(*(const uint16_t*)translate_insn_addr_to_host(addr + 2)) << 16;
     } else {
       static_assert(sizeof(insn_bits_t) == 8, "insn_bits_t must be uint64_t");
-      insn |= (insn_bits_t)*(const int16_t*)translate_insn_addr_to_host(addr + 6) << 48;
-      insn |= (insn_bits_t)*(const uint16_t*)translate_insn_addr_to_host(addr + 4) << 32;
-      insn |= (insn_bits_t)*(const uint16_t*)translate_insn_addr_to_host(addr + 2) << 16;
+      insn |= (insn_bits_t)from_le(*(const int16_t*)translate_insn_addr_to_host(addr + 6)) << 48;
+      insn |= (insn_bits_t)from_le(*(const uint16_t*)translate_insn_addr_to_host(addr + 4)) << 32;
+      insn |= (insn_bits_t)from_le(*(const uint16_t*)translate_insn_addr_to_host(addr + 2)) << 16;
     }
 
     insn_fetch_t fetch = {proc->decode_insn(insn), insn};
@@ -325,6 +339,9 @@ private:
   tlb_entry_t fetch_slow_path(reg_t addr);
   void load_slow_path(reg_t addr, reg_t len, uint8_t* bytes);
   void store_slow_path(reg_t addr, reg_t len, const uint8_t* bytes);
+  bool mmio_load(reg_t addr, size_t len, uint8_t* bytes);
+  bool mmio_store(reg_t addr, size_t len, const uint8_t* bytes);
+  bool mmio_ok(reg_t addr, access_type type);
   reg_t translate(reg_t addr, reg_t len, access_type type);
 
   // ITLB lookup
@@ -340,9 +357,9 @@ private:
     }
     if (unlikely(tlb_insn_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) {
       uint16_t* ptr = (uint16_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr);
-      int match = proc->trigger_match(OPERATION_EXECUTE, addr, *ptr);
+      int match = proc->trigger_match(OPERATION_EXECUTE, addr, from_le(*ptr));
       if (match >= 0) {
-        throw trigger_matched_t(match, OPERATION_EXECUTE, addr, *ptr);
+        throw trigger_matched_t(match, OPERATION_EXECUTE, addr, from_le(*ptr));
       }
     }
     return result;

@@ -20,13 +20,16 @@
 #undef STATE
 #define STATE state
 
-processor_t::processor_t(const char* isa, const char* varch, simif_t* sim,
-                         uint32_t id, bool halt_on_reset)
-  : debug(false), halt_request(false), sim(sim), ext(NULL), id(id),
-  halt_on_reset(halt_on_reset), last_pc(1), executions(1)
+processor_t::processor_t(const char* isa, const char* priv, const char* varch,
+                         simif_t* sim, uint32_t id, bool halt_on_reset,
+                         FILE* log_file)
+  : debug(false), halt_request(false), sim(sim), ext(NULL), id(id), xlen(0),
+  histogram_enabled(false), log_commits_enabled(false),
+  log_file(log_file), halt_on_reset(halt_on_reset), last_pc(1), executions(1)
 {
   VU.p = this;
   parse_isa_string(isa);
+  parse_priv_string(priv);
   parse_varch_string(varch);
   register_base_instructions();
   mmu = new mmu_t(sim, this);
@@ -60,23 +63,39 @@ static void bad_isa_string(const char* isa)
   abort();
 }
 
-static void bad_varch_string(const char* varch)
+static void bad_priv_string(const char* priv)
 {
-  fprintf(stderr, "error: bad --varch option %s\n", varch);
+  fprintf(stderr, "error: bad --priv option %s\n", priv);
   abort();
 }
 
-static int parse_varch(std::string &str){
-  int val = 0;
-  if(!str.empty()){
-    std::string sval = str.substr(1);
-    val = std::stoi(sval);
-    if ((val & (val - 1)) != 0) // val should be power of 2
-      bad_varch_string(str.c_str());
-  }else{
-    bad_varch_string(str.c_str());
+static void bad_varch_string(const char* varch, const char *message)
+{
+  fprintf(stderr, "error: bad --varch option %s: %s\n", varch, message);
+  abort();
+}
+
+static std::string get_string_token(std::string str, const char delimiter, size_t& pos)
+{
+  size_t _pos = pos;
+  while (pos < str.length() && str[pos] != delimiter) ++pos;
+  return str.substr(_pos, pos - _pos);
+}
+
+static int get_int_token(std::string str, const char delimiter, size_t& pos)
+{
+  size_t _pos = pos;
+  while (pos < str.length() && str[pos] != delimiter) {
+    if (!isdigit(str[pos]))
+      bad_varch_string(str.c_str(), "Unsupported value"); // An integer is expected
+    ++pos;
   }
-  return val;
+  return (pos == _pos) ? 0 : stoi(str.substr(_pos, pos - _pos));
+}
+
+static bool check_pow2(int val)
+{
+  return ((val & (val - 1))) == 0;
 }
 
 void processor_t::parse_varch_string(const char* s)
@@ -85,46 +104,85 @@ void processor_t::parse_varch_string(const char* s)
   for (const char *r = s; *r; r++)
     str += std::tolower(*r);
 
-  std::string delimiter = ":";
-
   size_t pos = 0;
+  size_t len = str.length();
   int vlen = 0;
   int elen = 0;
   int slen = 0;
-  std::string token;
-  while (!str.empty() && token != str) {
-    pos = str.find(delimiter);
-    if (pos == std::string::npos){
-      token = str;
-    }else{
-      token = str.substr(0, pos);
-    }
-    if (token[0] == 'v'){
-      vlen = parse_varch(token);
-    }else if (token[0] == 'e'){
-      elen = parse_varch(token);
-    }else if (token[0] == 's'){
-      slen = parse_varch(token);
-    }else{
-      bad_varch_string(str.c_str());
-    }
-    str.erase(0, pos + delimiter.length());
+
+  while (pos < len) {
+    std::string attr = get_string_token(str, ':', pos);
+
+    ++pos;
+
+    if (attr == "vlen")
+      vlen = get_int_token(str, ',', pos);
+    else if (attr == "slen")
+      slen = get_int_token(str, ',', pos);
+    else if (attr == "elen")
+      elen = get_int_token(str, ',', pos);
+    else
+      bad_varch_string(s, "Unsupported token");
+
+    ++pos;
   }
 
-  if (!(vlen >= 32 || vlen <= 4096) && !(slen >= vlen || slen <= vlen) && !(elen >= slen || elen <= slen)){
-    bad_varch_string(s);
+  // The integer should be the power of 2
+  if (!check_pow2(vlen) || !check_pow2(elen) || !check_pow2(slen)){
+    bad_varch_string(s, "The integer value should be the power of 2");
   }
+
+  /* Vector spec requirements. */
+  if (vlen < elen)
+    bad_varch_string(s, "vlen must be >= elen");
+  if (vlen < slen)
+    bad_varch_string(s, "vlen must be >= slen");
+  if (slen < 32)
+    bad_varch_string(s, "slen must be >= 32");
+  if ((unsigned) elen < std::max(max_xlen, get_flen()))
+    bad_varch_string(s, "elen must be >= max(xlen, flen)");
+  if (vlen != slen)
+    bad_varch_string(s, "vlen must be == slen for current limitation");
+
+  /* spike requirements. */
+  if (vlen > 4096)
+    bad_varch_string(s, "vlen must be <= 4096");
 
   VU.VLEN = vlen;
   VU.ELEN = elen;
   VU.SLEN = slen;
+  VU.vlenb = vlen / 8;
+}
+
+static std::string strtolower(const char* str)
+{
+  std::string res;
+  for (const char *r = str; *r; r++)
+    res += std::tolower(*r);
+  return res;
+}
+
+void processor_t::parse_priv_string(const char* str)
+{
+  std::string lowercase = strtolower(str);
+  bool user = false, supervisor = false;
+
+  if (lowercase == "m")
+    ;
+  else if (lowercase == "mu")
+    user = true;
+  else if (lowercase == "msu")
+    user = supervisor = true;
+  else
+    bad_priv_string(str);
+
+  max_isa |= reg_t(user) << ('u' - 'a');
+  max_isa |= reg_t(supervisor) << ('s' - 'a');
 }
 
 void processor_t::parse_isa_string(const char* str)
 {
-  std::string lowercase, tmp;
-  for (const char *r = str; *r; r++)
-    lowercase += std::tolower(*r);
+  std::string lowercase = strtolower(str), tmp;
 
   const char* p = lowercase.c_str();
   const char* all_subsets = "imafdqc"
@@ -134,10 +192,10 @@ void processor_t::parse_isa_string(const char* str)
     "";
 
   max_xlen = 64;
-  state.misa = reg_t(2) << 62;
+  max_isa = reg_t(2) << 62;
 
   if (strncmp(p, "rv32", 4) == 0)
-    max_xlen = 32, state.misa = reg_t(1) << 30, p += 4;
+    max_xlen = 32, max_isa = reg_t(1) << 30, p += 4;
   else if (strncmp(p, "rv64", 4) == 0)
     p += 4;
   else if (strncmp(p, "rv", 2) == 0)
@@ -153,11 +211,9 @@ void processor_t::parse_isa_string(const char* str)
   }
 
   isa_string = "rv" + std::to_string(max_xlen) + p;
-  state.misa |= 1L << ('s' - 'a'); // advertise support for supervisor mode
-  state.misa |= 1L << ('u' - 'a'); // advertise support for user mode
 
   while (*p) {
-    state.misa |= 1L << (*p - 'a');
+    max_isa |= 1L << (*p - 'a');
 
     if (auto next = strchr(all_subsets, *p)) {
       all_subsets = next + 1;
@@ -173,30 +229,75 @@ void processor_t::parse_isa_string(const char* str)
     }
   }
 
+  state.misa = max_isa;
+
   if (supports_extension('D') && !supports_extension('F'))
     bad_isa_string(str);
 
   if (supports_extension('Q') && !supports_extension('D'))
     bad_isa_string(str);
-
-  max_isa = state.misa;
 }
 
 void state_t::reset(reg_t max_isa)
 {
-  memset(this, 0, sizeof(*this));
-  misa = max_isa;
-  prv = PRV_M;
   pc = DEFAULT_RSTVEC;
-  tselect = 0;
-  for (unsigned int i = 0; i < num_triggers; i++)
-    mcontrol[i].type = 2;
+  XPR.reset();
+  FPR.reset();
 
-  pmpcfg[0] = PMP_R | PMP_W | PMP_X | PMP_NAPOT;
-  pmpaddr[0] = ~reg_t(0);
+  prv = PRV_M;
+  misa = max_isa;
+  mstatus = 0;
+  mepc = 0;
+  mtval = 0;
+  mscratch = 0;
+  mtvec = 0;
+  mcause = 0;
+  minstret = 0;
+  mie = 0;
+  mip = 0;
+  medeleg = 0;
+  mideleg = 0;
+  mcounteren = 0;
+  scounteren = 0;
+  sepc = 0;
+  stval = 0;
+  sscratch = 0;
+  stvec = 0;
+  satp = 0;
+  scause = 0;
+
+  dpc = 0;
+  dscratch0 = 0;
+  dscratch1 = 0;
+  memset(&this->dcsr, 0, sizeof(this->dcsr));
+
+  tselect = 0;
+  memset(this->mcontrol, 0, sizeof(this->mcontrol));
+  for (auto &item : mcontrol)
+    item.type = 2;
+
+  memset(this->tdata2, 0, sizeof(this->tdata2));
+  debug_mode = false;
+  single_step = STEP_NONE;
+
+  memset(this->pmpcfg, 0, sizeof(this->pmpcfg));
+  memset(this->pmpaddr, 0, sizeof(this->pmpaddr));
+
+  fflags = 0;
+  frm = 0;
+  serialized = false;
+
+#ifdef RISCV_ENABLE_COMMITLOG
+  log_reg_write.clear();
+  log_mem_read.clear();
+  log_mem_write.clear();
+  last_inst_priv = 0;
+  last_inst_xlen = 0;
+  last_inst_flen = 0;
+#endif
 }
 
-void vectorUnit_t::reset(){
+void processor_t::vectorUnit_t::reset(){
   free(reg_file);
   VLEN = get_vlen();
   ELEN = get_elen();
@@ -204,10 +305,10 @@ void vectorUnit_t::reset(){
   reg_file = malloc(NVPR * (VLEN/8));
 
   vtype = 0;
-  set_vl(-1, 0, -1); // default to illegal configuration
+  set_vl(0, 0, 0, -1); // default to illegal configuration
 }
 
-reg_t vectorUnit_t::set_vl(uint64_t regId, reg_t reqVL, reg_t newType){
+reg_t processor_t::vectorUnit_t::set_vl(int rd, int rs1, reg_t reqVL, reg_t newType){
   if (vtype != newType){
     vtype = newType;
     vsew = 1 << (BITS(newType, 4, 2) + 3);
@@ -217,11 +318,24 @@ reg_t vectorUnit_t::set_vl(uint64_t regId, reg_t reqVL, reg_t newType){
     vmlen = vsew / vlmul;
     reg_mask = (NVPR-1) & ~(vlmul-1);
 
-    vill = vsew > e64 || vediv != 1 || (newType >> 7) != 0;
-    if (vill)
+    vill = vsew > ELEN || vediv != 1 || (newType >> 7) != 0;
+    if (vill) {
       vlmax = 0;
+      vtype = UINT64_MAX << (p->get_xlen() - 1);
+    }
   }
-  vl = reqVL <= vlmax && regId != 0 ? reqVL : vlmax;
+
+  // set vl
+  if (vlmax == 0) {
+    vl = 0;
+  } else if (rd == 0 && rs1 == 0) {
+    vl = vl > vlmax ? vlmax : vl;
+  } else if (rd != 0 && rs1 == 0) {
+    vl = vlmax;
+  } else if (rs1 != 0) {
+    vl = reqVL > vlmax ? vlmax : reqVL;
+  }
+
   vstart = 0;
   setvl_count++;
   return vl;
@@ -246,25 +360,26 @@ void processor_t::set_histogram(bool value)
 #endif
 }
 
-void processor_t::set_log_commits(bool value)
+#ifdef RISCV_ENABLE_COMMITLOG
+void processor_t::enable_log_commits()
 {
-  log_commits_enabled = value;
-#ifndef RISCV_ENABLE_COMMITLOG
-  if (value) {
-    fprintf(stderr, "Commit logging support has not been properly enabled;");
-    fprintf(stderr, " please re-build the riscv-isa-sim project using \"configure --enable-commitlog\".\n");
-    abort();
-  }
-#endif
+  log_commits_enabled = true;
 }
+#endif
 
 void processor_t::reset()
 {
   state.reset(max_isa);
+
   state.dcsr.halt = halt_on_reset;
   halt_on_reset = false;
   set_csr(CSR_MSTATUS, state.mstatus);
   VU.reset();
+
+  // For backwards compatibility with software that is unaware of PMP,
+  // initialize PMP to permit unprivileged access to all of memory.
+  set_csr(CSR_PMPADDR0, ~reg_t(0));
+  set_csr(CSR_PMPCFG0, PMP_R | PMP_W | PMP_X | PMP_NAPOT);
 
   if (ext)
     ext->reset(); // reset the extension
@@ -335,7 +450,7 @@ reg_t processor_t::legalize_privilege(reg_t prv)
   if (!supports_extension('U'))
     return PRV_M;
 
-  if (prv == PRV_H || !supports_extension('S'))
+  if (prv == PRV_H || (prv == PRV_S && !supports_extension('S')))
     return PRV_U;
 
   return prv;
@@ -360,11 +475,11 @@ void processor_t::enter_debug_mode(uint8_t cause)
 void processor_t::take_trap(trap_t& t, reg_t epc)
 {
   if (debug) {
-    fprintf(stderr, "core %3d: exception %s, epc 0x%016" PRIx64 "\n",
+    fprintf(log_file, "core %3d: exception %s, epc 0x%016" PRIx64 "\n",
             id, t.name(), epc);
     if (t.has_tval())
-      fprintf(stderr, "core %3d:           tval 0x%016" PRIx64 "\n", id,
-          t.get_tval());
+      fprintf(log_file, "core %3d:           tval 0x%016" PRIx64 "\n",
+              id, t.get_tval());
   }
 
   if (state.debug_mode) {
@@ -425,10 +540,10 @@ void processor_t::disasm(insn_t insn)
   uint64_t bits = insn.bits() & ((1ULL << (8 * insn_length(insn.bits()))) - 1);
   if (last_pc != state.pc || last_bits != bits) {
     if (executions != 1) {
-      fprintf(stderr, "core %3d: Executed %" PRIx64 " times\n", id, executions);
+      fprintf(log_file, "core %3d: Executed %" PRIx64 " times\n", id, executions);
     }
 
-    fprintf(stderr, "core %3d: 0x%016" PRIx64 " (0x%08" PRIx64 ") %s\n",
+    fprintf(log_file, "core %3d: 0x%016" PRIx64 " (0x%08" PRIx64 ") %s\n",
             id, state.pc, bits, disassembler->disassemble(insn).c_str());
     last_pc = state.pc;
     last_bits = bits;
@@ -447,8 +562,9 @@ int processor_t::paddr_bits()
 void processor_t::set_csr(int which, reg_t val)
 {
   val = zext_xlen(val);
-  reg_t delegable_ints = MIP_SSIP | MIP_STIP | MIP_SEIP
-                       | ((ext != NULL) << IRQ_COP);
+  reg_t supervisor_ints = supports_extension('S') ? MIP_SSIP | MIP_STIP | MIP_SEIP : 0;
+  reg_t coprocessor_ints = (ext != NULL) << IRQ_COP;
+  reg_t delegable_ints = supervisor_ints | coprocessor_ints;
   reg_t all_ints = delegable_ints | MIP_MSIP | MIP_MTIP;
 
   if (which >= CSR_PMPADDR0 && which < CSR_PMPADDR0 + state.n_pmp) {
@@ -457,7 +573,7 @@ void processor_t::set_csr(int which, reg_t val)
     bool next_locked = i+1 < state.n_pmp && (state.pmpcfg[i+1] & PMP_L);
     bool next_tor = i+1 < state.n_pmp && (state.pmpcfg[i+1] & PMP_A) == PMP_TOR;
     if (!locked && !(next_locked && next_tor))
-      state.pmpaddr[i] = val;
+      state.pmpaddr[i] = val & ((reg_t(1) << (MAX_PADDR_BITS - PMP_SHIFT)) - 1);
 
     mmu->flush_tlb();
   }
@@ -487,17 +603,27 @@ void processor_t::set_csr(int which, reg_t val)
       dirty_fp_state;
       state.fflags = (val & FSR_AEXC) >> FSR_AEXC_SHIFT;
       state.frm = (val & FSR_RD) >> FSR_RD_SHIFT;
+      if (supports_extension('V')) {
+        VU.vxsat = (val & FSR_VXSAT) >> FSR_VXSAT_SHIFT;
+        VU.vxrm = (val & FSR_VXRM) >> FSR_VXRM_SHIFT;
+      }
       break;
     case CSR_MSTATUS: {
       if ((val ^ state.mstatus) &
           (MSTATUS_MPP | MSTATUS_MPRV | MSTATUS_SUM | MSTATUS_MXR))
         mmu->flush_tlb();
 
+      bool has_fs = supports_extension('S') || supports_extension('F')
+                  || supports_extension('V');
+      bool has_vs = supports_extension('V');
+
       reg_t mask = MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_MIE | MSTATUS_MPIE
-                 | MSTATUS_FS | MSTATUS_MPRV | MSTATUS_SUM
-                 | MSTATUS_MXR | MSTATUS_TW | MSTATUS_TVM
-                 | MSTATUS_TSR | MSTATUS_UXL | MSTATUS_SXL |
-                 (ext ? MSTATUS_XS : 0);
+                 | MSTATUS_MPRV
+                 | (supports_extension('S') ? MSTATUS_SUM : 0)
+                 | MSTATUS_MXR | MSTATUS_TW | MSTATUS_TVM | MSTATUS_TSR
+                 | (has_fs ? MSTATUS_FS : 0)
+                 | (has_vs ? MSTATUS_VS : 0)
+                 | (ext ? MSTATUS_XS : 0);
 
       reg_t requested_mpp = legalize_privilege(get_field(val, MSTATUS_MPP));
       state.mstatus = set_field(state.mstatus, MSTATUS_MPP, requested_mpp);
@@ -508,19 +634,22 @@ void processor_t::set_csr(int which, reg_t val)
 
       bool dirty = (state.mstatus & MSTATUS_FS) == MSTATUS_FS;
       dirty |= (state.mstatus & MSTATUS_XS) == MSTATUS_XS;
+      dirty |= (state.mstatus & MSTATUS_VS) == MSTATUS_VS;
       if (max_xlen == 32)
         state.mstatus = set_field(state.mstatus, MSTATUS32_SD, dirty);
       else
         state.mstatus = set_field(state.mstatus, MSTATUS64_SD, dirty);
 
-      state.mstatus = set_field(state.mstatus, MSTATUS_UXL, xlen_to_uxl(max_xlen));
-      state.mstatus = set_field(state.mstatus, MSTATUS_SXL, xlen_to_uxl(max_xlen));
+      if (supports_extension('U'))
+        state.mstatus = set_field(state.mstatus, MSTATUS_UXL, xlen_to_uxl(max_xlen));
+      if (supports_extension('S'))
+        state.mstatus = set_field(state.mstatus, MSTATUS_SXL, xlen_to_uxl(max_xlen));
       // U-XLEN == S-XLEN == M-XLEN
       xlen = max_xlen;
       break;
     }
     case CSR_MIP: {
-      reg_t mask = MIP_SSIP | MIP_STIP;
+      reg_t mask = supervisor_ints & (MIP_SSIP | MIP_STIP);
       state.mip = (state.mip & ~mask) | (val & mask);
       break;
     }
@@ -566,7 +695,8 @@ void processor_t::set_csr(int which, reg_t val)
       break;
     case CSR_SSTATUS: {
       reg_t mask = SSTATUS_SIE | SSTATUS_SPIE | SSTATUS_SPP | SSTATUS_FS
-                 | SSTATUS_XS | SSTATUS_SUM | SSTATUS_MXR;
+                 | SSTATUS_XS | SSTATUS_SUM | SSTATUS_MXR
+                 | (supports_extension('V') ? SSTATUS_VS : 0);
       return set_csr(CSR_MSTATUS, (state.mstatus & ~mask) | (val & mask));
     }
     case CSR_SIP: {
@@ -577,13 +707,14 @@ void processor_t::set_csr(int which, reg_t val)
       return set_csr(CSR_MIE,
                      (state.mie & ~state.mideleg) | (val & state.mideleg));
     case CSR_SATP: {
+      reg_t rv64_ppn_mask = (reg_t(1) << (MAX_PADDR_BITS - PGSHIFT)) - 1;
       mmu->flush_tlb();
       if (max_xlen == 32)
         state.satp = val & (SATP32_PPN | SATP32_MODE);
       if (max_xlen == 64 && (get_field(val, SATP64_MODE) == SATP_MODE_OFF ||
                              get_field(val, SATP64_MODE) == SATP_MODE_SV39 ||
                              get_field(val, SATP64_MODE) == SATP_MODE_SV48))
-        state.satp = val & (SATP64_PPN | SATP64_MODE);
+        state.satp = val & (SATP64_PPN | SATP64_MODE | rv64_ppn_mask);
       break;
     }
     case CSR_SEPC: state.sepc = val & ~(reg_t)1; break;
@@ -674,13 +805,16 @@ void processor_t::set_csr(int which, reg_t val)
       state.dscratch1 = val;
       break;
     case CSR_VSTART:
+      dirty_vs_state;
       VU.vstart = val;
       break;
     case CSR_VXSAT:
-      VU.vxsat = val;
+      dirty_fp_state;
+      VU.vxsat = val & 0x1ul;
       break;
     case CSR_VXRM:
-      VU.vxrm = val;
+      dirty_fp_state;
+      VU.vxrm = val & 0x3ul;
       break;
   }
 }
@@ -735,10 +869,15 @@ reg_t processor_t::get_csr(int which)
         break;
       return state.frm;
     case CSR_FCSR:
-      require_fp;
+      {require_fp;
       if (!supports_extension('F'))
         break;
-      return (state.fflags << FSR_AEXC_SHIFT) | (state.frm << FSR_RD_SHIFT);
+      uint32_t shared_flags = 0;
+      if (supports_extension('V'))
+            shared_flags = (VU.vxrm << FSR_VXRM_SHIFT) | (VU.vxsat << FSR_VXSAT_SHIFT);
+      return (state.fflags << FSR_AEXC_SHIFT) | (state.frm << FSR_RD_SHIFT) |
+          shared_flags;
+      }
     case CSR_INSTRET:
     case CSR_CYCLE:
       if (ctr_ok)
@@ -759,8 +898,10 @@ reg_t processor_t::get_csr(int which)
       break;
     case CSR_SCOUNTEREN: return state.scounteren;
     case CSR_MCOUNTEREN: return state.mcounteren;
+    case CSR_MCOUNTINHIBIT: return 0;
     case CSR_SSTATUS: {
       reg_t mask = SSTATUS_SIE | SSTATUS_SPIE | SSTATUS_SPP | SSTATUS_FS
+                 | (supports_extension('V') ? SSTATUS_VS : 0)
                  | SSTATUS_XS | SSTATUS_SUM | SSTATUS_MXR | SSTATUS_UXL;
       reg_t sstatus = state.mstatus & mask;
       if ((sstatus & SSTATUS_FS) == SSTATUS_FS ||
@@ -795,8 +936,14 @@ reg_t processor_t::get_csr(int which)
     case CSR_MVENDORID: return 0;
     case CSR_MHARTID: return id;
     case CSR_MTVEC: return state.mtvec;
-    case CSR_MEDELEG: return state.medeleg;
-    case CSR_MIDELEG: return state.mideleg;
+    case CSR_MEDELEG:
+      if (!supports_extension('S'))
+        break;
+      return state.medeleg;
+    case CSR_MIDELEG:
+      if (!supports_extension('S'))
+        break;
+      return state.mideleg;
     case CSR_TSELECT: return state.tselect;
     case CSR_TDATA1:
       if (state.tselect < state.num_triggers) {
@@ -853,29 +1000,26 @@ reg_t processor_t::get_csr(int which)
       return state.dscratch1;
     case CSR_VSTART:
       require_vector_vs;
-      if (!supports_extension('V'))
-        break;
       return VU.vstart;
     case CSR_VXSAT:
-      require_vector_vs;
+      require_fp;
       if (!supports_extension('V'))
         break;
       return VU.vxsat;
     case CSR_VXRM:
-      require_vector_vs;
+      require_fp;
       if (!supports_extension('V'))
         break;
       return VU.vxrm;
     case CSR_VL:
       require_vector_vs;
-      if (!supports_extension('V'))
-        break;
       return VU.vl;
     case CSR_VTYPE:
       require_vector_vs;
-      if (!supports_extension('V'))
-        break;
       return VU.vtype;
+    case CSR_VLENB:
+      require_vector_vs;
+      return VU.vlenb;
   }
   throw trap_illegal_instruction(0);
 }
