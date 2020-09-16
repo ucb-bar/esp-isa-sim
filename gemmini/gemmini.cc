@@ -12,7 +12,6 @@ void gemmini_state_t::reset()
   enable = true;
   mode = OS;
   act = NONE;
-  acc_shift = 0;
   sys_shift = 0;
   relu6_shift = 0;
   output_sp_addr = 0;
@@ -79,32 +78,30 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
           acc_t value;
           if (!gemmini_state.load_shrunk) {
 #ifdef ELEM_T_IS_FLOAT
-           value = acc_t_bits_to_acc_t(read_from_dram<acc_t_bits>(dram_byte_addr));
+            value = acc_t_bits_to_acc_t(read_from_dram<acc_t_bits>(dram_byte_addr));
 #else
-           value = read_from_dram<acc_t>(dram_byte_addr);
+            value = read_from_dram<acc_t>(dram_byte_addr);
+#endif
+
+#ifdef HAS_MVIN_ACC_SCALE
+            value = mvin_scale_acc(value, gemmini_state.load_scale);
 #endif
           } else {
 #ifdef ELEM_T_IS_FLOAT
-           value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_byte_addr));
+            value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_byte_addr));
 #else
-           value = read_from_dram<elem_t>(dram_byte_addr);
+            value = read_from_dram<elem_t>(dram_byte_addr);
+#endif
+
+#ifdef HAS_MVIN_SCALE
+            value = mvin_scale(value, gemmini_state.load_scale);
 #endif
           }
 
           if (accumulate) {
-#ifdef HAS_MVIN_ACC_SCALE
-            // gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) += gemmini_state.load_scale * value;
-            gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) += rounding_saturating_shift<acc_t>(value, gemmini_state.load_scale);
-#else
             gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) += value;
-#endif
           } else {
-#ifdef HAS_MVIN_ACC_SCALE
-            // gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
-            gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) = rounding_saturating_shift<acc_t>(value, gemmini_state.load_scale);
-#else
             gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) = value;
-#endif
           }
 
 #ifdef ELEM_T_IS_FLOAT
@@ -121,11 +118,10 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 #endif
 
 #ifdef HAS_MVIN_SCALE
-          // gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col) = gemmini_state.load_scale * value;
-          gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col) = rounding_saturating_shift<elem_t>(value, gemmini_state.load_scale);
-#else
-          gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col) = value;
+          value = mvin_scale(value, gemmini_state.load_scale);
 #endif
+
+          gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col) = value;
 
 #ifdef ELEM_T_IS_FLOAT
           dprintf("%f ", gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col));
@@ -153,7 +149,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
       for (size_t j = 0; j < cols; ++j) {
         if (accumulator) { // Apply shift and activation when moving out of accumulator
           acc_t acc_value = gemmini_state.accumulator.at(base_row_addr + i).at(j);
-          auto shifted = rounding_saturating_shift<elem_t>(acc_value, gemmini_state.acc_shift);
+          auto shifted = acc_scale(acc_value, gemmini_state.acc_shift);
           elem_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
           auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
@@ -211,7 +207,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
                 elem = 0;
               } else if (accumulator) {
                 acc_t acc_value = gemmini_state.accumulator.at(row_addr).at(poch);
-                auto shifted = rounding_saturating_shift<elem_t>(acc_value, gemmini_state.acc_shift);
+                auto shifted = acc_scale(acc_value, gemmini_state.acc_shift);
                 elem = apply_activation(shifted); // Activation is always applied in either WS/OS mode
               } else {
                 elem = gemmini_state.spad.at(row_addr).at(poch);
@@ -290,11 +286,11 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     gemmini_state.mode = new_mode;
     gemmini_state.act = new_act;
 
-    assert(new_acc_shift >= 0 && new_acc_shift < sizeof(acc_t)*8);
+    // assert(new_acc_shift >= 0 && new_acc_shift < sizeof(acc_t)*8);
     assert(new_sys_shift >= 0 && new_sys_shift < sizeof(output_t)*8);
     assert(new_relu6_shift >= 0);
 
-    gemmini_state.acc_shift = new_acc_shift;
+    gemmini_state.acc_shift = acc_scale_t_bits_to_acc_scale_t(new_acc_shift);
     gemmini_state.sys_shift = new_sys_shift;
     gemmini_state.relu6_shift = new_relu6_shift;
     gemmini_state.a_stride = new_a_stride;
@@ -453,8 +449,8 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
         acc_t value = gemmini_state.mode == gemmini_state_t::OS ? gemmini_state.pe_state.at(i).at(j) : results.at(i).at(j);
         if (acc) {
           output_t shifted = gemmini_state.mode == gemmini_state_t::OS ?
-                  rounding_saturating_shift<output_t>(value, gemmini_state.sys_shift) :
-                  rounding_saturating_shift<output_t>(value, 0);
+                  sys_shift(value, gemmini_state.sys_shift) :
+                  sys_shift(value, 0);
           if (acc_accum) {
             gemmini_state.accumulator.at(base_sp_addr + i).at(j) += value;
           } else { // Overwrite
@@ -467,8 +463,8 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
 #endif
         } else { // Move to scratchpad, apply activation along the way
           elem_t shifted = gemmini_state.mode == gemmini_state_t::OS ?
-                             rounding_saturating_shift<elem_t>(value, gemmini_state.sys_shift) :
-                             rounding_saturating_shift<elem_t>(value, 0);
+                             sys_shift(value, gemmini_state.sys_shift) :
+                             sys_shift(value, 0);
           elem_t activated = apply_activation(shifted);
           gemmini_state.spad.at(base_sp_addr + i).at(j) = activated;
 #ifdef ELEM_T_IS_FLOAT
@@ -529,6 +525,26 @@ scale_t gemmini_t::scale_t_bits_to_scale_t(scale_t_bits bits) {
 }
 #endif
 
+acc_scale_t_bits gemmini_t::acc_scale_t_to_acc_scale_t_bits(acc_scale_t scale) {
+    union {
+        acc_scale_t scale;
+        acc_scale_t_bits bits;
+    } un;
+
+    un.scale = scale;
+    return un.bits;
+}
+
+acc_scale_t gemmini_t::acc_scale_t_bits_to_acc_scale_t(acc_scale_t_bits bits) {
+    union {
+        acc_scale_t scale;
+        acc_scale_t_bits bits;
+    } un;
+
+    un.bits = bits;
+    return un.scale;
+}
+
 // Applying activation from PE post-shifted output to scratchpad (for OS dataflow)
 // or from accumulator to DRAM (after shifting, for WS dataflow)
 elem_t gemmini_t::apply_activation(elem_t value) {
@@ -542,29 +558,60 @@ elem_t gemmini_t::apply_activation(elem_t value) {
   } else assert(false);
 }
 
-template <class T>
-T gemmini_t::rounding_saturating_shift(acc_t value, int64_t shift) {
-#ifndef ELEM_T_IS_FLOAT
-  acc_t shifted;
-  if (shift > 0) {
-  // Rounding right shift equation: https://riscv.github.io/documents/riscv-v-spec/#_vector_fixed_point_rounding_mode_register_vxrm
-    int r = ((value >> (shift-1)) & 1) &
-         (((shift <= 1 ? 0 : (value & ((1 << (shift-1)) - 1))) != 0) | ((value >> shift) & 1));
-    shifted = (value >> shift) + r;
-  } else {
-    shifted = value << -shift;
-  }
+#ifdef HAS_MVIN_SCALE
+elem_t gemmini_t::mvin_scale(elem_t value, scale_t scale) {
+  acc_t scaled = MVIN_SCALE(value, scale);
 
+#ifndef ELEM_T_IS_FLOAT
   // Saturate and cast element
-  auto elem_t_max = std::numeric_limits<T>::max();
-  auto elem_t_min = std::numeric_limits<T>::min();
-  int64_t elem = shifted > elem_t_max ? elem_t_max : (shifted < elem_t_min ? elem_t_min : shifted);
-  return static_cast<T>(elem);
-#else
-  if (shift <= 0)
-    return value * (1 << shift);
-  return value / (1 << shift);
+  const auto elem_t_max = std::numeric_limits<elem_t>::max();
+  const auto elem_t_min = std::numeric_limits<elem_t>::min();
+  scaled = scaled > elem_t_max ? elem_t_max : (scaled < elem_t_min ? elem_t_min : scaled);
 #endif
+
+  return scaled;
+}
+#endif
+
+#ifdef HAS_MVIN_ACC_SCALE
+acc_t gemmini_t::mvin_scale_acc(acc_t value, scale_acc_t scale) {
+  acc_t scaled = MVIN_SCALE_ACC(value, scale);
+
+#ifndef ELEM_T_IS_FLOAT
+  // Saturate and cast element
+  const auto elem_t_max = std::numeric_limits<acc_t>::max();
+  const auto elem_t_min = std::numeric_limits<acc_t>::min();
+  scaled = scaled > elem_t_max ? elem_t_max : (scaled < elem_t_min ? elem_t_min : scaled);
+#endif
+
+  return scaled;
+}
+#endif
+
+elem_t gemmini_t::acc_scale(acc_t value, acc_scale_t scale) {
+  acc_t scaled = ACC_SCALE(value, scale);
+
+#ifndef ELEM_T_IS_FLOAT
+  // Saturate and cast element
+  const auto elem_t_max = std::numeric_limits<elem_t>::max();
+  const auto elem_t_min = std::numeric_limits<elem_t>::min();
+  scaled = scaled > elem_t_max ? elem_t_max : (scaled < elem_t_min ? elem_t_min : scaled);
+#endif
+
+  return scaled;
+}
+
+elem_t gemmini_t::sys_shift(acc_t value, unsigned int shift) {
+  acc_t shifted = ROUNDING_RIGHT_SHIFT(value, shift);
+
+#ifndef ELEM_T_IS_FLOAT
+  // Saturate and cast element
+  const auto elem_t_max = std::numeric_limits<elem_t>::max();
+  const auto elem_t_min = std::numeric_limits<elem_t>::min();
+  shifted = shifted > elem_t_max ? elem_t_max : (shifted < elem_t_min ? elem_t_min : shifted);
+#endif
+
+  return shifted;
 }
 
 #ifdef ELEM_T_IS_FLOAT

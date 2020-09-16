@@ -33,13 +33,14 @@ struct gemmini_state_t
   uint16_t output_cols, output_rows;
   Dataflow mode;
   Activation act;
-  reg_t acc_shift, sys_shift, relu6_shift;
+  reg_t sys_shift, relu6_shift;
   reg_t load_stride;
   reg_t store_stride;
   bool load_shrunk;
 #ifdef HAS_MVIN_SCALE
   scale_t load_scale;
 #endif
+  acc_scale_t acc_shift;
   uint16_t a_stride;
   uint8_t pool_stride;
   uint8_t pool_size;
@@ -89,20 +90,22 @@ private:
   bool debug;
   elem_t apply_activation(elem_t value);
 
-  template <class T>
-  T rounding_saturating_shift(acc_t value, int64_t shift);
+#ifdef HAS_MVIN_SCALE
+  elem_t mvin_scale(elem_t value, scale_t scale);
+#endif
+
+#ifdef HAS_MVIN_ACC_SCALE
+  acc_t mvin_scale_acc(acc_t value, scale_acc_t scale);
+#endif
+
+  elem_t acc_scale(acc_t value, acc_scale_t acc);
+  elem_t sys_shift(output_t value, unsigned int shift);
 
   template <class T>
   T read_from_dram(reg_t addr);
 
   template <class T>
   void write_to_dram(reg_t addr, T data);
-
-  // template <class T>
-  // T mvin_scale_func(acc_t value, scale_t scale);
-
-  // template <class T>
-  // T mvout_scale_func(acc_t value, scale_t scale);
 
 #ifdef ELEM_T_IS_FLOAT
   elem_t elem_t_bits_to_elem_t(elem_t_bits x);
@@ -115,6 +118,9 @@ private:
   scale_t_bits scale_t_to_scale_t_bits(scale_t scale);
   scale_t scale_t_bits_to_scale_t(scale_t_bits bits);
 #endif
+
+  acc_scale_t_bits acc_scale_t_to_acc_scale_t_bits(acc_scale_t scale);
+  acc_scale_t acc_scale_t_bits_to_acc_scale_t(acc_scale_t_bits bits);
 };
 
 #endif
