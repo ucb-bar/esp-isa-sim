@@ -29,6 +29,11 @@ void gemmini_state_t::reset()
   accumulator.clear();
   accumulator.resize(accum_rows, std::vector<acc_t>(DIM, 0));
 
+  // cisc reset
+  a_addr = b_addr = c_addr = d_addr = 0;
+  m = n = k = 0;
+  repeating_bias = false;
+
   printf("Gemmini extension configured with:\n");
   printf("    dim = %u\n", DIM);
 }
@@ -44,6 +49,44 @@ T gemmini_t::read_from_dram(reg_t addr) {
     value |= p->get_mmu()->load_uint8(addr + byte_idx) << (byte_idx*8);
   }
   return value;
+}
+
+template <class T>
+std::vector<std::vector<T>> *
+matrix_zeroes(reg_t rows, reg_t cols) {
+  return new std::vector<std::vector<T>>(rows, std::vector<T>(cols, 0));
+}
+
+template <class T>
+std::vector<std::vector<T>> *
+gemmini_t::read_matrix_from_dram(reg_t addr, reg_t rows, reg_t cols,
+                                  bool zeroable, bool repeating_bias) {
+  // Read and return Matrix of size `rows*cols` from address `addr` in main
+  // memory
+
+  // Initialize to all zeroes
+  auto result = matrix_zeroes<T>(rows, cols);
+
+  // if an input matrix is at addr 0, it is NULL, so don't do anything with
+  // it only the D matrix is zeroable; the A, B matrices must be valid
+  if(addr == 0) {
+    if(zeroable) {
+      return result;
+    }
+    printf("ERROR: non-zeroable matrix given address zero!\n");
+    exit(1);
+  }
+
+  // Load from memory
+  for (size_t i = 0; i < rows; i++) {
+    auto ii = repeating_bias ? 0 : i;
+    auto const dram_row_addr = addr + ii*sizeof(T)*cols;
+    for (size_t j = 0; j < cols; j++) {
+      auto const dram_byte_addr = dram_row_addr + j*sizeof(T);
+      result->at(i).at(j) = gemmini_t::read_from_dram<T>(dram_byte_addr);
+    }
+  }
+  return result;
 }
 
 template <class T>
@@ -452,8 +495,63 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   }
 }
 
+void gemmini_t::compute_cisc() {
+  // `compute` performs Gemmini's core function - matrix multiply-add -
+  //  without referencing any underlying hardware detail.
+  //
+  // * Operands A, B, and D are loaded from memory
+  // * Multiply, add, activation, and any requested shifts are performed
+  // * Result D is written back to memory
+  //
+  // These computations are made independent of systolic array sizes,
+  // scratchpad-memory sizes,
+  // and any other microarchitectural detail (other than datatypes).
+
+  // Load operands from memory
+  auto A = read_matrix_from_dram<elem_t>(gemmini_state.a_addr,
+                                          gemmini_state.m,
+                                          gemmini_state.k,
+                                          false, false);
+  auto B = read_matrix_from_dram<elem_t>(gemmini_state.b_addr,
+                                          gemmini_state.k,
+                                          gemmini_state.n,
+                                          false, false);
+  auto D = read_matrix_from_dram<acc_t>(gemmini_state.d_addr,
+                                          gemmini_state.m,
+                                          gemmini_state.n,
+                                          true,
+                                          gemmini_state.repeating_bias);
+  // Initialize an accumulator/ result
+  auto C = matrix_zeroes<elem_t>(gemmini_state.m, gemmini_state.n);
+
+  // Multiply & apply activation
+  for (size_t i=0; i<gemmini_state.m; i++) {
+    for (size_t j=0; j<gemmini_state.n; j++) {
+      acc_t value = D->at(i).at(j);
+      for (size_t k=0; k<gemmini_state.k; k++) {
+        value += ((acc_t)A->at(i).at(k)) * ((acc_t)B->at(k).at(j));
+      }
+      elem_t shifted = rounding_saturating_shift<elem_t>(value,
+                          gemmini_state.acc_shift);
+      elem_t activated = apply_activation(shifted);
+      C->at(i).at(j) = activated;
+    }
+  }
+
+  // Write back to memory
+  for (size_t i = 0; i < gemmini_state.m; i++) {
+    auto const dram_row_addr = gemmini_state.c_addr +
+                               i*sizeof(elem_t)*gemmini_state.n;
+    for (size_t j = 0; j < gemmini_state.n; j++) {
+      auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
+      write_to_dram<elem_t>(dram_byte_addr, C->at(i).at(j));
+    }
+  }
+}
+
 reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
-  insn.funct = (insn.funct & 0b111); // Strip the dependency bits from the funct field
+  // TODO: ssteffl changed 0b111 to 0b11111 for extra cisc instructions!
+  insn.funct = (insn.funct & 0b11111); // Strip the dependency bits from the funct field
   if (insn.funct == mvin_funct)
     mvin(xs1, xs2);
   else if (insn.funct == mvout_funct)
@@ -469,6 +567,37 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   else if (insn.funct == flush_funct) {
     dprintf("GEMMINI: flush\n");
   }
+  //==========================================================================
+  // gemmini-cisc opcodes
+  //==========================================================================
+  else if (insn.funct == config_cisc_ex_funct) {
+    config(xs1, xs2);
+  }
+  else if (insn.funct == config_addr_AB_funct) {
+    gemmini_state.a_addr = xs1;
+    gemmini_state.b_addr = xs2;
+  }
+  else if (insn.funct == config_addr_CD_funct ){
+    gemmini_state.c_addr = xs1;
+    gemmini_state.d_addr = xs2;
+  }
+  else if (insn.funct == config_size0_funct ){
+    gemmini_state.m = xs1;
+    gemmini_state.n = xs2;
+  }
+  else if (insn.funct == config_size1_funct ){
+    gemmini_state.k = xs1;
+  }
+  else if (insn.funct == config_repeating_bias_funct){
+    gemmini_state.repeating_bias = (bool)xs1;
+  }
+  else if (insn.funct == config_reset_funct) {
+    reset();
+  }
+  else if (insn.funct == compute_cisc_funct) {
+    compute_cisc();
+  }
+  //==========================================================================
   else {
     dprintf("GEMMINI: encountered unknown instruction with funct: %d\n", insn.funct);
     illegal_instruction();

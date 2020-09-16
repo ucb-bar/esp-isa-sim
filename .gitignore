@@ -2,6 +2,7 @@ build/
 *.gch
 autom4te.cache/
 .*.swp
+*.swo
 *.o
 *.d
 .gdb_history
