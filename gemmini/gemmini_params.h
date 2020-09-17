@@ -38,14 +38,18 @@ typedef uint32_t acc_scale_t_bits;
 
 // Rounding right shift equation: https://riscv.github.io/documents/riscv-v-spec/#_vector_fixed_point_rounding_mode_register_vxrm
 #define ROUNDING_RIGHT_SHIFT(x, shift) \
-    ({(shift) > 0 ? (((x) >> (shift)) + \
+    ((shift) > 0 ? (((x) >> (shift)) + \
         (((shift) == 0 ? 0 : (((x) >> ((shift)-1)) & 1)) & \
-             ((((shift) <= 1 ? 0 : ((x) & ((1 << ((shift)-1)) - 1))) != 0) | (((x) >> (shift)) & 1)))) : ((x) << (-(shift)));})
+             ((((shift) <= 1 ? 0 : ((x) & ((1 << ((shift)-1)) - 1))) != 0) | (((x) >> (shift)) & 1)))) : ((x) << (-(shift))))
 
 #define ACC_SCALE(x, scale) \
-    ({float y = (x) * (scale); y > std::numeric_limits<acc_t>::max() ? std::numeric_limits<acc_t>::max() : (y < std::numeric_limits<acc_t>::min() ? std::numeric_limits<acc_t>::min() : (acc_t)y);})
+    ({float y = (x) * (scale); y > INT_MAX ? INT_MAX : (y < INT_MIN ? INT_MIN : (acc_t)y);})
 
 #define MVIN_SCALE(x, scale) \
     ROUNDING_RIGHT_SHIFT(x, scale)
+
+#define ACC_SCALE_T_IS_FLOAT
+#define ACC_SCALE_EXP_BITS 8
+#define ACC_SCALE_SIG_BITS 24
 
 #endif // GEMMINI_PARAMS_H
