@@ -83,7 +83,11 @@ gemmini_t::read_matrix_from_dram(reg_t addr, reg_t rows, reg_t cols,
     auto const dram_row_addr = addr + ii*sizeof(T)*cols;
     for (size_t j = 0; j < cols; j++) {
       auto const dram_byte_addr = dram_row_addr + j*sizeof(T);
-      result->at(i).at(j) = gemmini_t::read_from_dram<T>(dram_byte_addr);
+#ifdef ELEM_T_IS_FLOAT
+      result->at(i).at(j) = elem_t_bits_to_elem_t(gemmini_t::read_from_dram<elem_t_bits>(dram_byte_addr));
+#else
+      result->at(i).at(j) = gemmini_t::read_from_dram<elem_t>(dram_byte_addr);
+#endif
     }
   }
   return result;
@@ -544,7 +548,11 @@ void gemmini_t::compute_cisc() {
                                i*sizeof(elem_t)*gemmini_state.n;
     for (size_t j = 0; j < gemmini_state.n; j++) {
       auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
+#ifdef ELEM_T_IS_FLOAT
+      write_to_dram<elem_t_bits>(dram_byte_addr, C->at(i).at(j));
+#else
       write_to_dram<elem_t>(dram_byte_addr, C->at(i).at(j));
+#endif
     }
   }
 }
