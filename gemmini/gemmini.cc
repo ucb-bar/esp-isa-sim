@@ -10,15 +10,15 @@ REGISTER_EXTENSION(gemmini, []() { return new gemmini_t; })
 void gemmini_state_t::reset()
 {
   enable = true;
-  mode = OS;
-  act = NONE;
-  sys_shift = 0;
-  relu6_shift = 0;
-  output_sp_addr = 0;
-  load_stride = DIM * sizeof(elem_t);
-  store_stride = DIM * sizeof(elem_t);
-  pool_stride = 0;
-  load_shrunk = false;
+  // mode = OS;
+  // act = NONE;
+  // sys_shift = 0;
+  // relu6_shift = 0;
+  // output_sp_addr = 0;
+  // load_stride = DIM * sizeof(elem_t);
+  // store_stride = DIM * sizeof(elem_t);
+  // pool_stride = 0;
+  // load_shrunk = false;
 
   spad.clear();
   spad.resize(sp_matrices*DIM, std::vector<elem_t>(DIM, 0));
@@ -55,17 +55,21 @@ void gemmini_t::write_to_dram(reg_t addr, T data) {
 
 // Move a gemmini block from DRAM at dram_addr (byte addr) to
 // the scratchpad/accumulator at sp_addr (gemmini-row addressed)
-void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
+void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
   bool const accumulator = (sp_addr >> 31) & 0x1;
   bool const accumulate = (sp_addr >> 30) & 0x1;
-  auto const base_row_addr = (sp_addr & 0x3FFFFFFF); // Strip accumulator addressing bits [31:30]
+  auto const base_row_addr = (sp_addr & 0x1FFFFFFF); // Strip accumulator addressing bits [31:29]
   auto const cols = (sp_addr >> addr_len) & 0xFFFF;
   auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
+
+  auto const load_stride = gemmini_state.load_strides[state_id];
+  auto const load_shrunk = gemmini_state.load_shrunks[state_id];
+  auto const load_scale = gemmini_state.load_scales[state_id];
 
   dprintf("GEMMINI: mvin - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, dram_addr, sp_addr & 0xFFFFFFFF);
 
   for (size_t row = 0; row < rows; ++row) {
-    auto const dram_row_addr = dram_addr + row*gemmini_state.load_stride;
+    auto const dram_row_addr = dram_addr + row*load_stride;
 
     for (size_t col = 0; col < cols; ++col) {
       const size_t block = col / DIM;
@@ -73,10 +77,10 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 
       if (accumulator) {
           auto const dram_byte_addr = dram_row_addr + col *
-            (gemmini_state.load_shrunk ? sizeof(elem_t) : sizeof(acc_t));
+            (load_shrunk ? sizeof(elem_t) : sizeof(acc_t));
 
           acc_t value;
-          if (!gemmini_state.load_shrunk) {
+          if (!load_shrunk) {
 #ifdef ELEM_T_IS_FLOAT
             value = acc_t_bits_to_acc_t(read_from_dram<acc_t_bits>(dram_byte_addr));
 #else
@@ -84,7 +88,7 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 #endif
 
 #ifdef HAS_MVIN_ACC_SCALE
-            value = mvin_scale_acc(value, gemmini_state.load_scale);
+            value = mvin_scale_acc(value, load_scale);
 #endif
           } else {
 #ifdef ELEM_T_IS_FLOAT
@@ -94,7 +98,7 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 #endif
 
 #ifdef HAS_MVIN_SCALE
-            value = mvin_scale(value, gemmini_state.load_scale);
+            value = mvin_scale(value, load_scale);
 #endif
           }
 
@@ -118,7 +122,7 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 #endif
 
 #ifdef HAS_MVIN_SCALE
-          value = mvin_scale(value, gemmini_state.load_scale);
+          value = mvin_scale(value, load_scale);
 #endif
 
           gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col) = value;
@@ -136,7 +140,8 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr) {
 
 void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   bool const accumulator = (sp_addr >> 31) & 0x1;
-  auto const base_row_addr = (sp_addr & 0x3FFFFFFF); // Strip accumulator addressing bits [31:30]
+  bool const full = (sp_addr >> 29) & 0x1;
+  auto const base_row_addr = (sp_addr & 0x1FFFFFFF); // Strip accumulator addressing bits [31:30]
   auto const cols = (sp_addr >> addr_len) & 0xFFFF;
   auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
 
@@ -152,13 +157,25 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
           auto shifted = acc_scale(acc_value, gemmini_state.acc_shift);
           elem_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
-          auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
+          auto const sizeof_output = full ? sizeof(acc_t) : sizeof(elem_t);
+
+          auto const dram_byte_addr = dram_row_addr + j*sizeof_output;
 #ifdef ELEM_T_IS_FLOAT
-          write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(activated));
-          dprintf("%f ", activated);
+          if (full) {
+            write_to_dram<acc_t_bits>(dram_byte_addr, acc_t_to_acc_t_bits(acc_value));
+            dprintf("%f ", acc_value);
+          } else {
+            write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(activated));
+            dprintf("%f ", activated);
+          }
 #else
-          write_to_dram<elem_t>(dram_byte_addr, activated);
-          dprintf("%d ", activated);
+          if (full) {
+            write_to_dram<acc_t>(dram_byte_addr, acc_value);
+            dprintf("%d ", acc_value);
+          } else {
+            write_to_dram<elem_t>(dram_byte_addr, activated);
+            dprintf("%d ", activated);
+          }
 #endif
         } else { // Scratchpad, write to DRAM directly
           auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
@@ -190,7 +207,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
 
     for (int porow = 0; porow < porows; porow++) {
       for (int pocol = 0; pocol < pocols; pocol++) {
-        for (int poch = 0; poch < channels; poch++) {
+        for (int poch = 0; poch < (int)channels; poch++) {
           elem_t value = elem_t_min;
 
           for (int wrow = 0; wrow < pool_size; wrow++) {
@@ -301,11 +318,12 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
 
   } else if ((rs1 & 0b11) == 1) { // rs1[1:0] == 2'b01, config_mvin, configure load pipeline
     dprintf("GEMMINI: config_mvin - set load stride from %lu to %lu\n", gemmini_state.load_stride, rs2);
-    gemmini_state.load_stride = rs2;
+    const int state_id = (rs1 >> 3) & 0x3;
+    gemmini_state.load_strides[state_id] = rs2;
 #if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
-    dprintf("GEMMINI: config_mvin - set load scale from %lu to %lu\n", gemmini_state.load_scale, scale_t_bits_to_scale_t(rs1 >> 32));
-    gemmini_state.load_scale = scale_t_bits_to_scale_t(rs1 >> 32);
-    gemmini_state.load_shrunk = (rs1 >> 2) & 1;
+    dprintf("GEMMINI: config_mvin - set load scale from %lu to %lu\n", gemmini_state.load_scales[state_id], scale_t_bits_to_scale_t(rs1 >> 32));
+    gemmini_state.load_scales[state_id] = scale_t_bits_to_scale_t(rs1 >> 32);
+    gemmini_state.load_shrunks[state_id] = (rs1 >> 2) & 1;
 #endif
   } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
     dprintf("GEMMINI: config_mvout - set store stride from %lu to %lu\n", gemmini_state.store_stride, rs2);
@@ -479,11 +497,149 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   }
 }
 
+void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
+  const bool ex_accumulate = rs1 & 1;
+
+  const uint16_t I = gemmini_state.loop_ws_I;
+  const uint16_t J = gemmini_state.loop_ws_J;
+  const uint16_t K = gemmini_state.loop_ws_K;
+
+  const uint16_t pad_I = gemmini_state.loop_ws_pad_I;
+  const uint16_t pad_J = gemmini_state.loop_ws_pad_J;
+  const uint16_t pad_K = gemmini_state.loop_ws_pad_K;
+
+  const uint32_t GARBAGE_ADDR = ~0;
+
+  const int total_spad_rows = (I * K + K * J) * DIM;
+  const int total_acc_rows = (I * J) * DIM;
+
+  if (total_spad_rows > BANK_NUM * BANK_ROWS / 2 || total_acc_rows > ACC_ROWS / 2) {
+    printf("LOOP_WS bounds were too large for double-buffering\n");
+    exit(1);
+  }
+
+  const uint32_t A_sp_addr_start = 0;
+  const uint32_t B_sp_addr_start = (BANK_NUM * BANK_ROWS / 2) - K * J * DIM;
+  const uint32_t D_sp_addr_start = 1 << (ADDR_LEN-1);
+  const uint32_t C_sp_addr_start = 3 << (ADDR_LEN-2);
+
+  if (gemmini_state.loop_ws_D != 0) {
+    for (uint16_t i = 0; i < I; i++) {
+      for (uint16_t j = 0; j < J; j++) {
+        const uint64_t dram_addr = gemmini_state.loop_ws_D +
+          (i * gemmini_state.loop_ws_D_stride + j) * DIM * sizeof(acc_t);
+
+        const uint64_t sp_addr = D_sp_addr_start + (i*J + j)*DIM;
+
+        const uint64_t cols = DIM - (j == J-1 ? pad_J : 0);
+        const uint64_t rows = DIM - (i == I-1 ? pad_I : 0);
+
+        mvin(dram_addr, (rows << 48) | (cols << 32) | sp_addr, 2);
+      }
+    }
+  }
+
+  for (uint16_t k = 0; k < K; k++) {
+    for (uint16_t j = 0; j < J; j++) {
+      for (uint16_t i = 0; i < I; i++) {
+        const uint32_t A_sp_addr = A_sp_addr_start + (i*K + k)*DIM;
+        const uint32_t B_sp_addr = B_sp_addr_start + (k*J + j)*DIM;
+        const uint32_t C_sp_addr = C_sp_addr_start + (i*J + j)*DIM;
+
+        // Mvin A
+        if (j == 0) {
+          const uint64_t A_dram_addr = gemmini_state.loop_ws_A +
+              (i*gemmini_state.loop_ws_A_stride + k) * DIM * sizeof(elem_t);
+          const uint64_t cols = DIM - (k == K-1 ? pad_K : 0);
+          const uint64_t rows = DIM - (k == I-1 ? pad_I : 0);
+          mvin(A_dram_addr, (rows << 48) | (cols << 32) | A_sp_addr, 0);
+        }
+
+        // Mvin B
+        if (i == 0) {
+          const uint64_t B_dram_addr = gemmini_state.loop_ws_B +
+              (k*gemmini_state.loop_ws_B_stride + j) * DIM * sizeof(elem_t);
+          const uint64_t cols = DIM - (j == J-1 ? pad_J : 0);
+          const uint64_t rows = DIM - (k == K-1 ? pad_K : 0);
+          mvin(B_dram_addr, (rows << 48) | (cols << 32) | B_sp_addr, 1);
+        }
+
+        // Compute
+        {
+          uint32_t pre_sp_addr = i == 0 ? B_sp_addr : GARBAGE_ADDR;
+          uint32_t out_sp_addr = C_sp_addr;
+
+          if (!ex_accumulate && k == 0) {
+            out_sp_addr &= ~(1 << (ADDR_LEN-2));
+          }
+
+          const uint64_t A_cols = DIM - (k == K - 1 ? pad_K : 0);
+          const uint64_t A_rows = DIM - (i == I - 1 ? pad_I : 0);
+          const uint64_t B_cols = DIM - (j == J - 1 ? pad_J : 0);
+          const uint64_t B_rows = DIM - (k == K - 1 ? pad_K : 0);
+          const uint64_t C_cols = DIM - (j == J - 1 ? pad_J : 0);
+          const uint64_t C_rows = DIM - (i == I - 1 ? pad_I : 0);
+
+          preload((B_rows << 48) | (B_cols << 32) | pre_sp_addr,
+              (C_rows << 48) | (C_cols << 32) | out_sp_addr);
+
+          compute((A_rows << 48) | (A_cols << 32) | A_sp_addr,
+              ((uint64_t)DIM << 48) | ((uint64_t)DIM << 32) | GARBAGE_ADDR, i == 0);
+        }
+
+        // Move-out C
+        if (gemmini_state.loop_ws_C != 0 && k == K-1) {
+          const uint64_t C_dram_addr = gemmini_state.loop_ws_C +
+              (i*gemmini_state.loop_ws_C_stride + j) * DIM * sizeof(elem_t);
+
+          const uint64_t C_cols = DIM - (j == J - 1 ? pad_J : 0);
+          const uint64_t C_rows = DIM - (i == I - 1 ? pad_I : 0);
+
+          mvout(C_dram_addr, (C_rows << 48) | (C_cols << 32) | C_sp_addr);
+        }
+      }
+    }
+  }
+}
+
+void gemmini_t::loop_ws_config_bounds(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_ws_I = rs2 & 0xFFFF;
+  gemmini_state.loop_ws_J = (rs2 >> 16) & 0xFFFF;
+  gemmini_state.loop_ws_K = (rs2 >> 32) & 0xFFFF;
+
+  gemmini_state.loop_ws_pad_I = rs1 & 0xFFFF;
+  gemmini_state.loop_ws_pad_J = (rs1 >> 16) & 0xFFFF;
+  gemmini_state.loop_ws_pad_K = (rs1 >> 32) & 0xFFFF;
+}
+
+void gemmini_t::loop_ws_config_addrs_AB(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_ws_A = rs1;
+  gemmini_state.loop_ws_B = rs2;
+}
+
+void gemmini_t::loop_ws_config_addrs_DC(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_ws_D = rs1;
+  gemmini_state.loop_ws_C = rs2;
+}
+
+void gemmini_t::loop_ws_config_strides_AB(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_ws_A_stride = rs1;
+  gemmini_state.loop_ws_B_stride = rs2;
+}
+
+void gemmini_t::loop_ws_config_strides_DC(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_ws_D_stride = rs1;
+  gemmini_state.loop_ws_C_stride = rs2;
+}
+
 reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
-  insn.funct = (insn.funct & 0b111); // Strip the dependency bits from the funct field
-  if (insn.funct == mvin_funct)
-    mvin(xs1, xs2);
-  else if (insn.funct == mvout_funct)
+  if (insn.funct == mvin_funct) {
+    mvin(xs1, xs2, 0);
+  } else if (insn.funct == mvin2_funct) {
+    mvin(xs1, xs2, 1);
+  } else if (insn.funct == mvin3_funct) {
+    mvin(xs1, xs2, 2);
+  } else if (insn.funct == mvout_funct)
     mvout(xs1, xs2);
   else if (insn.funct == preload_funct)
     preload(xs1, xs2);
@@ -495,8 +651,19 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     compute(xs1, xs2, false);
   else if (insn.funct == flush_funct) {
     dprintf("GEMMINI: flush\n");
-  }
-  else {
+  } else if (insn.funct == loop_ws_config_bounds_funct) {
+    loop_ws_config_bounds(xs1, xs2);
+  } else if (insn.funct == loop_ws_config_addrs_AB_funct) {
+    loop_ws_config_addrs_AB(xs1, xs2);
+  } else if (insn.funct == loop_ws_config_addrs_DC_funct) {
+    loop_ws_config_addrs_DC(xs1, xs2);
+  } else if (insn.funct == loop_ws_config_strides_AB_funct) {
+    loop_ws_config_strides_AB(xs1, xs2);
+  } else if (insn.funct == loop_ws_config_strides_DC_funct) {
+    loop_ws_config_strides_DC(xs1, xs2);
+  } else if (insn.funct == loop_ws_funct) {
+    loop_ws(xs1, xs2);
+  } else {
     dprintf("GEMMINI: encountered unknown instruction with funct: %d\n", insn.funct);
     illegal_instruction();
   }

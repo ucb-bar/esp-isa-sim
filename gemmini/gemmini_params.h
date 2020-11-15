@@ -14,8 +14,8 @@
 #define MAX_BLOCK_LEN_ACC (MAX_BYTES/(DIM*4))
 
 typedef int8_t elem_t;
-elem_t elem_t_max = 127;
-elem_t elem_t_min = -128;
+static const elem_t elem_t_max = 127;
+static const elem_t elem_t_min = -128;
 typedef int32_t acc_t;
 typedef int64_t full_t;
 
@@ -67,5 +67,8 @@ typedef uint32_t acc_scale_t_bits;
 #define ACC_SCALE_T_IS_FLOAT
 #define ACC_SCALE_EXP_BITS 8
 #define ACC_SCALE_SIG_BITS 24
+
+#define ACC_READ_SMALL_WIDTH
+#define ACC_READ_FULL_WIDTH
 
 #endif // GEMMINI_PARAMS_H

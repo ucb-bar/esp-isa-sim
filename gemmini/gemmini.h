@@ -11,6 +11,7 @@ typedef acc_t output_t; // Systolic array output datatype (coming down from PEs,
 static const uint32_t sp_matrices = (BANK_NUM * BANK_ROWS) / DIM; // Size the scratchpad to fit sp_matrices matrices
 static const uint32_t accum_rows = ACC_ROWS; // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the scratchpad/accumulator
+#define LOAD_STATES 3
 
 // #define RISCV_ENABLE_GEMMINI_COMMITLOG
 
@@ -34,11 +35,11 @@ struct gemmini_state_t
   Dataflow mode;
   Activation act;
   reg_t sys_shift, relu6_shift;
-  reg_t load_stride;
+  reg_t load_strides[LOAD_STATES];
   reg_t store_stride;
-  bool load_shrunk;
+  bool load_shrunks[LOAD_STATES];
 #ifdef HAS_MVIN_SCALE
-  scale_t load_scale;
+  scale_t load_scales[LOAD_STATES];
 #endif
   acc_scale_t acc_shift;
   uint16_t a_stride;
@@ -53,6 +54,10 @@ struct gemmini_state_t
   uint8_t pool_upad;
   bool a_transpose;
   bool b_transpose;
+  uint16_t loop_ws_I, loop_ws_J, loop_ws_K;
+  uint16_t loop_ws_pad_I, loop_ws_pad_J, loop_ws_pad_K;
+  uint64_t loop_ws_A, loop_ws_B, loop_ws_D, loop_ws_C;
+  uint64_t loop_ws_A_stride, loop_ws_B_stride, loop_ws_D_stride, loop_ws_C_stride;
 
   bool enable;
   std::vector<std::vector<elem_t>> spad; // Scratchpad constructed as systolic array rows
@@ -68,11 +73,18 @@ public:
   reg_t custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2);
   void reset();
 
-  void mvin(reg_t dram_addr, reg_t sp_addr);
+  void mvin(reg_t dram_addr, reg_t sp_addr, int state_id);
   void mvout(reg_t dram_addr, reg_t sp_addr);
   void preload(reg_t bd_addr, reg_t c_addr);
   void config(reg_t rs1, reg_t rs2);
   void compute(reg_t a_addr, reg_t bd_addr, bool preload);
+
+  void loop_ws(reg_t rs1, reg_t rs2);
+  void loop_ws_config_bounds(reg_t rs1, reg_t rs2);
+  void loop_ws_config_addrs_AB(reg_t rs1, reg_t rs2);
+  void loop_ws_config_addrs_DC(reg_t rs1, reg_t rs2);
+  void loop_ws_config_strides_AB(reg_t rs1, reg_t rs2);
+  void loop_ws_config_strides_DC(reg_t rs1, reg_t rs2);
 
 private:
   gemmini_state_t gemmini_state;
@@ -81,11 +93,19 @@ private:
 
   const unsigned config_funct = 0;
   const unsigned mvin_funct = 2;
+  const unsigned mvin2_funct = 1;
+  const unsigned mvin3_funct = 14;
   const unsigned mvout_funct = 3;
   const unsigned compute_preloaded_funct = 4;
   const unsigned compute_accumulated_funct = 5;
   const unsigned preload_funct = 6;
   const unsigned flush_funct = 7;
+  const unsigned loop_ws_funct = 8;
+  const unsigned loop_ws_config_bounds_funct = 9;
+  const unsigned loop_ws_config_addrs_AB_funct = 10;
+  const unsigned loop_ws_config_addrs_DC_funct = 11;
+  const unsigned loop_ws_config_strides_AB_funct = 12;
+  const unsigned loop_ws_config_strides_DC_funct = 13;
 
   bool debug;
   elem_t apply_activation(elem_t value);
