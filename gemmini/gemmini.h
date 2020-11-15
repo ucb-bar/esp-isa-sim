@@ -60,9 +60,15 @@ struct gemmini_state_t
   uint64_t loop_ws_A_stride, loop_ws_B_stride, loop_ws_D_stride, loop_ws_C_stride;
 
   bool enable;
+
   std::vector<std::vector<elem_t>> spad; // Scratchpad constructed as systolic array rows
   std::vector<std::vector<acc_t>> pe_state; // Stores each PE's internal accumulator state
   std::vector<std::vector<acc_t>> accumulator;
+
+  // cisc state
+  reg_t a_addr, b_addr, c_addr, d_addr;
+  reg_t m, n, k;
+  bool repeating_bias;
 };
 
 class gemmini_t : public rocc_t
@@ -78,6 +84,7 @@ public:
   void preload(reg_t bd_addr, reg_t c_addr);
   void config(reg_t rs1, reg_t rs2);
   void compute(reg_t a_addr, reg_t bd_addr, bool preload);
+  void compute_cisc();
 
   void loop_ws(reg_t rs1, reg_t rs2);
   void loop_ws_config_bounds(reg_t rs1, reg_t rs2);
@@ -107,6 +114,19 @@ private:
   const unsigned loop_ws_config_strides_AB_funct = 12;
   const unsigned loop_ws_config_strides_DC_funct = 13;
 
+  //==========================================================================
+  // gemmini-cisc opcodes
+  //==========================================================================
+  const unsigned config_cisc_ex_funct        = 10;
+  const unsigned config_addr_AB_funct        = 11;
+  const unsigned config_addr_CD_funct        = 12;
+  const unsigned config_size0_funct          = 13;
+  const unsigned config_size1_funct          = 14;
+  const unsigned config_repeating_bias_funct = 15;
+  const unsigned config_reset_funct          = 16;
+  const unsigned compute_cisc_funct          = 17;
+  //==========================================================================
+
   bool debug;
   elem_t apply_activation(elem_t value);
 
@@ -123,6 +143,11 @@ private:
 
   template <class T>
   T read_from_dram(reg_t addr);
+
+  template <class T>
+  std::vector<std::vector<T>> *
+  read_matrix_from_dram(reg_t addr, reg_t rows, reg_t cols, 
+                        bool zeroable, bool repeating_bias);
 
   template <class T>
   void write_to_dram(reg_t addr, T data);
