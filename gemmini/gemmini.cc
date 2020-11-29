@@ -425,11 +425,16 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
           assert(((gemmini_state.preload_sp_addr >> 30) & 0b11) == 0); // Preloads from accumulator not supported
         }
 
+        bool preload_tranpose = (gemmini_state.mode == gemmini_state_t::WS) &&
+          gemmini_state.b_transpose;
+        size_t r = preload_tranpose ? j : i;
+        size_t c = preload_tranpose ? i : j;
+
         // In OS mode, pe_state stores the accumulator values
         // In WS mode, pe_state stores the persistent weight matrix
         if (i < gemmini_state.preload_rows && j < gemmini_state.preload_cols) {
           auto preload_value = (~gemmini_state.preload_sp_addr == 0) ? 0 :
-                  gemmini_state.spad.at(gemmini_state.preload_sp_addr + i).at(j);
+                  gemmini_state.spad.at(gemmini_state.preload_sp_addr + r).at(c);
           gemmini_state.pe_state.at(i).at(j) = preload_value;
         } else {
           gemmini_state.pe_state.at(i).at(j) = 0;
@@ -471,10 +476,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
         }
 
         if (gemmini_state.mode == gemmini_state_t::WS) {
-          const size_t r = gemmini_state.b_transpose ? j : k;
-          const size_t c = gemmini_state.b_transpose ? k : j;
-
-          results.at(i).at(j) += a * gemmini_state.pe_state.at(r).at(c);
+          results.at(i).at(j) += a * gemmini_state.pe_state.at(k).at(j);
         } else {
           elem_t b = 0;
           if (~bd_addr_real != 0) {
