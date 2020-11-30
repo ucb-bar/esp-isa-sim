@@ -548,6 +548,8 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
 
 void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
   const bool ex_accumulate = rs1 & 1;
+  const bool a_transpose = rs2 & 1;
+  const bool b_transpose = (rs2 >> 1) & 1;
 
   const uint16_t I = gemmini_state.loop_ws_I;
   const uint16_t J = gemmini_state.loop_ws_J;
@@ -591,26 +593,48 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
   for (uint16_t k = 0; k < K; k++) {
     for (uint16_t j = 0; j < J; j++) {
       for (uint16_t i = 0; i < I; i++) {
-        const uint32_t A_sp_addr = A_sp_addr_start + (i*K + k)*DIM;
-        const uint32_t B_sp_addr = B_sp_addr_start + (k*J + j)*DIM;
+        const uint32_t A_sp_addr = a_transpose ? (A_sp_addr_start + (k*I + i)*DIM) :
+          (A_sp_addr_start + (i*K + k)*DIM);
+        const uint32_t B_sp_addr = b_transpose ? (B_sp_addr_start + (j*K + k)*DIM) :
+          (B_sp_addr_start + (k*J + j)*DIM);
         const uint32_t C_sp_addr = C_sp_addr_start + (i*J + j)*DIM;
 
         // Mvin A
         if (j == 0) {
-          const uint64_t A_dram_addr = gemmini_state.loop_ws_A +
-              (i*gemmini_state.loop_ws_A_stride + k) * DIM * sizeof(elem_t);
-          const uint64_t cols = DIM - (k == K-1 ? pad_K : 0);
-          const uint64_t rows = DIM - (k == I-1 ? pad_I : 0);
-          mvin(A_dram_addr, (rows << 48) | (cols << 32) | A_sp_addr, 0);
+          uint64_t dram_addr, cols, rows;
+
+          if (a_transpose) {
+            dram_addr = gemmini_state.loop_ws_A +
+                (k*gemmini_state.loop_ws_A_stride + i) * DIM * sizeof(elem_t);
+            cols = DIM - (i == I-1 ? pad_I : 0);
+            rows = DIM - (k == K-1 ? pad_K : 0);
+          } else {
+            dram_addr = gemmini_state.loop_ws_A +
+                (i*gemmini_state.loop_ws_A_stride + k) * DIM * sizeof(elem_t);
+            cols = DIM - (k == K-1 ? pad_K : 0);
+            rows = DIM - (i == I-1 ? pad_I : 0);
+          }
+
+          mvin(dram_addr, (rows << 48) | (cols << 32) | A_sp_addr, 0);
         }
 
         // Mvin B
         if (i == 0) {
-          const uint64_t B_dram_addr = gemmini_state.loop_ws_B +
-              (k*gemmini_state.loop_ws_B_stride + j) * DIM * sizeof(elem_t);
-          const uint64_t cols = DIM - (j == J-1 ? pad_J : 0);
-          const uint64_t rows = DIM - (k == K-1 ? pad_K : 0);
-          mvin(B_dram_addr, (rows << 48) | (cols << 32) | B_sp_addr, 1);
+          uint64_t dram_addr, cols, rows;
+
+          if (b_transpose) {
+            dram_addr = gemmini_state.loop_ws_B +
+                (j*gemmini_state.loop_ws_B_stride + k) * DIM * sizeof(elem_t);
+            cols = DIM - (k == K-1 ? pad_K : 0);
+            rows = DIM - (j == J-1 ? pad_J : 0);
+          } else {
+            dram_addr = gemmini_state.loop_ws_B +
+                (k*gemmini_state.loop_ws_B_stride + j) * DIM * sizeof(elem_t);
+            cols = DIM - (j == J-1 ? pad_J : 0);
+            rows = DIM - (k == K-1 ? pad_K : 0);
+          }
+
+          mvin(dram_addr, (rows << 48) | (cols << 32) | B_sp_addr, 1);
         }
 
         // Compute
