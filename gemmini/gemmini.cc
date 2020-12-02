@@ -508,7 +508,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
   if (~gemmini_state.output_sp_addr != 0) {
     bool const acc = (gemmini_state.output_sp_addr >> 31) & 0x1;
     bool const acc_accum = (gemmini_state.output_sp_addr >> 30) & 0x1;
-    auto const base_sp_addr = gemmini_state.output_sp_addr & 0x3FFFFFFF;
+    auto const base_sp_addr = gemmini_state.output_sp_addr & 0x1FFFFFFF;
     dprintf("GEMMINI: compute - writing results to addr 0x%08x, :\n", gemmini_state.output_sp_addr);
 
     for (size_t i = 0; i < gemmini_state.output_rows; ++i) {
@@ -548,6 +548,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
 
 void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
   const bool ex_accumulate = rs1 & 1;
+  const bool full_C = (rs1 >> 1) & 1;
   const bool a_transpose = rs2 & 1;
   const bool b_transpose = (rs2 >> 1) & 1;
 
@@ -572,7 +573,7 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
   const uint32_t A_sp_addr_start = 0;
   const uint32_t B_sp_addr_start = (BANK_NUM * BANK_ROWS / 2) - K * J * DIM;
   const uint32_t D_sp_addr_start = 1 << (ADDR_LEN-1);
-  const uint32_t C_sp_addr_start = 3 << (ADDR_LEN-2);
+  const uint32_t C_sp_addr_start = (3 << (ADDR_LEN-2)) | (full_C << (ADDR_LEN-3));
 
   if (gemmini_state.loop_ws_D != 0) {
     for (uint16_t i = 0; i < I; i++) {
@@ -662,8 +663,9 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
 
         // Move-out C
         if (gemmini_state.loop_ws_C != 0 && k == K-1) {
+          const size_t sizeof_C = full_C ? sizeof(acc_t) : sizeof(elem_t);
           const uint64_t C_dram_addr = gemmini_state.loop_ws_C +
-              (i*gemmini_state.loop_ws_C_stride + j) * DIM * sizeof(elem_t);
+              (i*gemmini_state.loop_ws_C_stride + j) * DIM * sizeof_C;
 
           const uint64_t C_cols = DIM - (j == J - 1 ? pad_J : 0);
           const uint64_t C_rows = DIM - (i == I - 1 ? pad_I : 0);
