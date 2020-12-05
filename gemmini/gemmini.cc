@@ -549,6 +549,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
 void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
   const bool ex_accumulate = rs1 & 1;
   const bool full_C = (rs1 >> 1) & 1;
+  const bool low_D = (rs1 >> 2) & 1;
   const bool a_transpose = rs2 & 1;
   const bool b_transpose = (rs2 >> 1) & 1;
 
@@ -578,8 +579,10 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
   if (gemmini_state.loop_ws_D != 0) {
     for (uint16_t i = 0; i < I; i++) {
       for (uint16_t j = 0; j < J; j++) {
+        const size_t sizeof_D = low_D ? sizeof(elem_t) : sizeof(acc_t);
+
         const uint64_t dram_addr = gemmini_state.loop_ws_D +
-          (i * gemmini_state.loop_ws_D_stride + j) * DIM * sizeof(acc_t);
+          (i * gemmini_state.loop_ws_D_stride + j) * DIM * sizeof_D;
 
         const uint64_t sp_addr = D_sp_addr_start + (i*J + j)*DIM;
 
