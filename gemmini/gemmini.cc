@@ -833,6 +833,8 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   //==========================================================================
   else if (insn.funct == flush_funct) {
     dprintf("GEMMINI: flush\n");
+  } else if (insn.funct == fence_funct) {
+    dprintf("GEMMINI: fence\n");
   } else {
     dprintf("GEMMINI: encountered unknown instruction with funct: %d\n", insn.funct);
     illegal_instruction();
