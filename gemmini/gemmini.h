@@ -37,8 +37,9 @@ struct gemmini_state_t
   reg_t sys_shift, relu6_shift;
   reg_t load_strides[LOAD_STATES];
   reg_t store_stride;
+  uint16_t load_block_strides[LOAD_STATES];
   bool load_shrunks[LOAD_STATES];
-#ifdef HAS_MVIN_SCALE
+#if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
   scale_t load_scales[LOAD_STATES];
 #endif
   acc_scale_t acc_shift;

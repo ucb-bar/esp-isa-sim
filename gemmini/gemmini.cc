@@ -109,9 +109,14 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
   auto const cols = (sp_addr >> addr_len) & 0xFFFF;
   auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
 
+  bool is_zeros = dram_addr == 0;
+
   auto const load_stride = gemmini_state.load_strides[state_id];
+  auto const load_block_stride = gemmini_state.load_block_strides[state_id];
   auto const load_shrunk = gemmini_state.load_shrunks[state_id];
+#if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
   auto const load_scale = gemmini_state.load_scales[state_id];
+#endif
 
   dprintf("GEMMINI: mvin - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, dram_addr, sp_addr & 0xFFFFFFFF);
 
@@ -127,7 +132,9 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
             (load_shrunk ? sizeof(elem_t) : sizeof(acc_t));
 
           acc_t value;
-          if (!load_shrunk) {
+          if (is_zeros) {
+            value = 0;
+          } else if (!load_shrunk) {
 #ifdef ELEM_T_IS_FLOAT
             value = acc_t_bits_to_acc_t(read_from_dram<acc_t_bits>(dram_byte_addr));
 #else
@@ -150,34 +157,40 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
           }
 
           if (accumulate) {
-            gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) += value;
+            gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col) += value;
           } else {
-            gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) = value;
+            gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col) = value;
           }
 
 #ifdef ELEM_T_IS_FLOAT
-          dprintf("%f ", gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col));
+          dprintf("%f ", gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col));
 #else
-          dprintf("%d ", gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col));
+          dprintf("%d ", gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col));
 #endif
       } else {
           auto const dram_byte_addr = dram_row_addr + col*sizeof(elem_t);
+
+          elem_t value;
+          if (is_zeros) {
+            value = 0;
+          } else {
 #ifdef ELEM_T_IS_FLOAT
-          auto value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_byte_addr));
+            value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_byte_addr));
 #else
-          auto value = read_from_dram<elem_t>(dram_byte_addr);
+            value = read_from_dram<elem_t>(dram_byte_addr);
 #endif
 
 #ifdef HAS_MVIN_SCALE
-          value = mvin_scale(value, load_scale);
+            value = mvin_scale(value, load_scale);
 #endif
+          }
 
-          gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col) = value;
+          gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col) = value;
 
 #ifdef ELEM_T_IS_FLOAT
-          dprintf("%f ", gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col));
+          dprintf("%f ", gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col));
 #else
-          dprintf("%d ", gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col));
+          dprintf("%d ", gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col));
 #endif
       }
     }
@@ -367,6 +380,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     const int state_id = (rs1 >> 3) & 0x3;
     dprintf("GEMMINI: config_mvin - set load stride from %lu to %lu\n", gemmini_state.load_strides[state_id], rs2);
     gemmini_state.load_strides[state_id] = rs2;
+    gemmini_state.load_block_strides[state_id] = (rs1 >> 16) & 0xFFFF;
 #if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
     dprintf("GEMMINI: config_mvin - set load scale from %lu to %lu\n", gemmini_state.load_scales[state_id], scale_t_bits_to_scale_t(rs1 >> 32));
     gemmini_state.load_scales[state_id] = scale_t_bits_to_scale_t(rs1 >> 32);
