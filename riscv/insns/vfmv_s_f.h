@@ -1,31 +1,26 @@
 // vfmv_s_f: vd[0] = rs1 (vs2=0)
 require_vector;
-require(insn.v_vm() == 1);
 require_fp;
 require_extension('F');
-require(P.VU.vsew == e32);
+require(P.VU.vsew >= e32 && P.VU.vsew <= 64);
 reg_t vl = P.VU.vl;
 
-if (vl > 0) {
+if (vl > 0 && P.VU.vstart < vl) {
   reg_t rd_num = insn.rd();
-  reg_t sew = P.VU.vsew;
 
-  if (FLEN == 64)
-    P.VU.elt<uint32_t>(rd_num, 0) = f64(FRS1).v;
-  else
-    P.VU.elt<uint32_t>(rd_num, 0) = f32(FRS1).v;
-
-  const reg_t max_len = P.VU.VLEN / sew;
-  for (reg_t i = 1; i < max_len; ++i) {
-    switch(sew) {
-    case e32:
-      P.VU.elt<uint32_t>(rd_num, i) = 0;
+  switch(P.VU.vsew) {
+    case 32:
+      if (FLEN == 64)
+        P.VU.elt<uint32_t>(rd_num, 0, true) = f64(FRS1).v;
+      else
+        P.VU.elt<uint32_t>(rd_num, 0, true) = f32(FRS1).v;
       break;
-    default:
-      require(false);
+    case 64:
+      if (FLEN == 64)
+        P.VU.elt<uint64_t>(rd_num, 0, true) = f64(FRS1).v;
+      else
+        P.VU.elt<uint64_t>(rd_num, 0, true) = f32(FRS1).v;
       break;
-    }
   }
-
-  vl = 0;
 }
+P.VU.vstart = 0;

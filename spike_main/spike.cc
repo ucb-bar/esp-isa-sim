@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <fstream>
 #include "../VERSION"
 
 static void help(int exit_code = 1)
@@ -29,6 +30,7 @@ static void help(int exit_code = 1)
   fprintf(stderr, "  -h, --help            Print this help message\n");
   fprintf(stderr, "  -H                    Start halted, allowing a debugger to connect\n");
   fprintf(stderr, "  --isa=<name>          RISC-V ISA string [default %s]\n", DEFAULT_ISA);
+  fprintf(stderr, "  --priv=<m|mu|msu>     RISC-V privilege modes supported [default %s]\n", DEFAULT_PRIV);
   fprintf(stderr, "  --varch=<name>        RISC-V Vector uArch string [default %s]\n", DEFAULT_VARCH);
   fprintf(stderr, "  --pc=<address>        Override ELF entry point\n");
   fprintf(stderr, "  --hartids=<a,b,...>   Explicitly specify hartids, default is 0,1,...\n");
@@ -48,6 +50,8 @@ static void help(int exit_code = 1)
   fprintf(stderr, "  --rbb-port=<port>     Listen on <port> for remote bitbang connection\n");
   fprintf(stderr, "  --dump-dts            Print device tree string and exit\n");
   fprintf(stderr, "  --disable-dtb         Don't write the device tree blob into memory\n");
+  fprintf(stderr, "  --initrd=<path>       Load kernel initrd into memory\n");
+  fprintf(stderr, "  --real-time-clint     Increment clint time at real-time rate\n");
   fprintf(stderr, "  --dm-progsize=<words> Progsize for the debug module [default 2]\n");
   fprintf(stderr, "  --dm-sba=<bits>       Debug bus master supports up to "
       "<bits> wide accesses [default 0]\n");
@@ -67,6 +71,26 @@ static void suggest_help()
 {
   fprintf(stderr, "Try 'spike --help' for more information.\n");
   exit(1);
+}
+
+static bool check_file_exists(const char *fileName)
+{
+  std::ifstream infile(fileName);
+  return infile.good();
+}
+
+static std::ifstream::pos_type get_file_size(const char *filename)
+{
+  std::ifstream in(filename, std::ios::ate | std::ios::binary);
+  return in.tellg();
+}
+
+static void read_file_bytes(const char *filename,size_t fileoff,
+                            char *read_buf, size_t read_sz)
+{
+  std::ifstream in(filename, std::ios::in | std::ios::binary);
+  in.seekg(fileoff, std::ios::beg);
+  in.read(read_buf, read_sz);
 }
 
 static std::vector<std::pair<reg_t, mem_t*>> make_mems(const char* arg)
@@ -108,7 +132,10 @@ int main(int argc, char** argv)
   bool log = false;
   bool dump_dts = false;
   bool dtb_enabled = true;
+  bool real_time_clint = false;
   size_t nprocs = 1;
+  size_t initrd_size;
+  reg_t initrd_start = 0, initrd_end = 0;
   reg_t start_pc = reg_t(-1);
   std::vector<std::pair<reg_t, mem_t*>> mems;
   std::vector<std::pair<reg_t, abstract_device_t*>> plugin_devices;
@@ -117,8 +144,11 @@ int main(int argc, char** argv)
   std::unique_ptr<cache_sim_t> l2;
   bool log_cache = false;
   bool log_commits = false;
+  const char *log_path = nullptr;
   std::function<extension_t*()> extension;
+  const char* initrd = NULL;
   const char* isa = DEFAULT_ISA;
+  const char* priv = DEFAULT_PRIV;
   const char* varch = DEFAULT_VARCH;
   uint16_t rbb_port = 0;
   bool use_rbb = false;
@@ -207,11 +237,14 @@ int main(int argc, char** argv)
   parser.option(0, "l2", 1, [&](const char* s){l2.reset(cache_sim_t::construct(s, "L2$"));});
   parser.option(0, "log-cache-miss", 0, [&](const char* s){log_cache = true;});
   parser.option(0, "isa", 1, [&](const char* s){isa = s;});
+  parser.option(0, "priv", 1, [&](const char* s){priv = s;});
   parser.option(0, "varch", 1, [&](const char* s){varch = s;});
   parser.option(0, "device", 1, device_parser);
   parser.option(0, "extension", 1, [&](const char* s){extension = find_extension(s);});
   parser.option(0, "dump-dts", 0, [&](const char *s){dump_dts = true;});
   parser.option(0, "disable-dtb", 0, [&](const char *s){dtb_enabled = false;});
+  parser.option(0, "initrd", 1, [&](const char* s){initrd = s;});
+  parser.option(0, "real-time-clint", 0, [&](const char *s){real_time_clint = true;});
   parser.option(0, "extlib", 1, [&](const char *s){
     void *lib = dlopen(s, RTLD_NOW | RTLD_GLOBAL);
     if (lib == NULL) {
@@ -235,7 +268,10 @@ int main(int argc, char** argv)
       [&](const char* s){dm_config.support_abstract_csr_access = false;});
   parser.option(0, "dm-no-halt-groups", 0,
       [&](const char* s){dm_config.support_haltgroups = false;});
-  parser.option(0, "log-commits", 0, [&](const char* s){log_commits = true;});
+  parser.option(0, "log-commits", 0,
+                [&](const char* s){log_commits = true;});
+  parser.option(0, "log", 1,
+                [&](const char* s){log_path = s;});
 
   auto argv1 = parser.parse(argv);
   std::vector<std::string> htif_args(argv1, (const char*const*)argv + argc);
@@ -245,8 +281,21 @@ int main(int argc, char** argv)
   if (!*argv1)
     help();
 
-  sim_t s(isa, varch, nprocs, halted, start_pc, mems, plugin_devices, htif_args,
-      std::move(hartids), dm_config);
+  if (initrd && check_file_exists(initrd)) {
+    initrd_size = get_file_size(initrd);
+    for (auto& m : mems) {
+      if (initrd_size && (initrd_size + 0x1000) < m.second->size()) {
+         initrd_end = m.first + m.second->size() - 0x1000;
+         initrd_start = initrd_end - initrd_size;
+         read_file_bytes(initrd, 0, m.second->contents() + (initrd_start - m.first), initrd_size);
+         break;
+      }
+    }
+  }
+
+  sim_t s(isa, priv, varch, nprocs, halted, real_time_clint,
+      initrd_start, initrd_end, start_pc, mems, plugin_devices, htif_args,
+      std::move(hartids), dm_config, log_path);
   std::unique_ptr<remote_bitbang_t> remote_bitbang((remote_bitbang_t *) NULL);
   std::unique_ptr<jtag_dtm_t> jtag_dtm(
       new jtag_dtm_t(&s.debug_module, dmi_rti));
@@ -276,9 +325,8 @@ int main(int argc, char** argv)
   }
 
   s.set_debug(debug);
-  s.set_log(log);
+  s.configure_log(log, log_commits);
   s.set_histogram(histogram);
-  s.set_log_commits(log_commits);
 
   auto return_code = s.run();
 
