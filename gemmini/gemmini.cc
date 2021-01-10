@@ -782,6 +782,307 @@ void gemmini_t::loop_ws_config_strides_DC(reg_t rs1, reg_t rs2) {
   gemmini_state.loop_ws_C_stride = rs2;
 }
 
+void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
+  const bool no_bias = rs1 & 1;
+  const bool no_pool = rs2 & 1;
+
+  const uint16_t batch_size = gemmini_state.loop_conv_ws_batch_size;
+  const uint16_t in_dim = gemmini_state.loop_conv_ws_in_dim;
+  const uint16_t in_channels = gemmini_state.loop_conv_ws_in_channels;
+  const uint16_t out_channels = gemmini_state.loop_conv_ws_out_channels;
+  const uint16_t out_dim = gemmini_state.loop_conv_ws_out_dim;
+  const uint16_t pool_out_dim = gemmini_state.loop_conv_ws_pool_out_dim;
+  const uint16_t stride = gemmini_state.loop_conv_ws_stride;
+  const uint16_t padding = gemmini_state.loop_conv_ws_padding;
+  const uint16_t kernel_dim = gemmini_state.loop_conv_ws_kernel_dim;
+  const uint16_t pool_size = gemmini_state.loop_conv_ws_pool_size;
+  const uint16_t pool_stride = gemmini_state.loop_conv_ws_pool_stride;
+  const uint16_t pool_padding = gemmini_state.loop_conv_ws_pool_padding;
+  const uint16_t batches = gemmini_state.loop_conv_ws_batches;
+  const uint16_t porows = gemmini_state.loop_conv_ws_porows;
+  const uint16_t pocols = gemmini_state.loop_conv_ws_pocols;
+  const uint16_t pochs = gemmini_state.loop_conv_ws_pochs;
+  const uint16_t krows = gemmini_state.loop_conv_ws_krows;
+  const uint16_t kcols = gemmini_state.loop_conv_ws_kcols;
+  const uint16_t kchs = gemmini_state.loop_conv_ws_kchs;
+  const uint16_t lpad = gemmini_state.loop_conv_ws_lpad;
+  const uint16_t rpad = gemmini_state.loop_conv_ws_rpad;
+  const uint16_t upad = gemmini_state.loop_conv_ws_upad;
+  const uint16_t dpad = gemmini_state.loop_conv_ws_dpad;
+  const uint16_t plpad = gemmini_state.loop_conv_ws_plpad;
+  const uint16_t prad = gemmini_state.loop_conv_ws_prad;
+  const uint16_t pupad = gemmini_state.loop_conv_ws_pupad;
+  const uint16_t pdpad = gemmini_state.loop_conv_ws_pdpad;
+  const uint16_t orows = gemmini_state.loop_conv_ws_orows;
+  const uint16_t ocols = gemmini_state.loop_conv_ws_ocols;
+  const uint64_t weights = gemmini_state.loop_conv_ws_weights;
+  const uint64_t output = gemmini_state.loop_conv_ws_output;
+  const uint64_t bias = gemmini_state.loop_conv_ws_bias;
+  const uint64_t input = gemmini_state.loop_conv_ws_input;
+
+  const uint16_t ochs = pochs;
+
+  // Calculate image dimensions
+  // Note: "irows" and "icols" includes padding
+  const int16_t irows = orows * stride + krows - 1; // - 2 * padding;
+  const int16_t icols = ocols * stride + kcols - 1; // - 2 * padding;
+  const int16_t irows_unpadded = irows - upad - dpad;
+  const int16_t icols_unpadded = icols - lpad - rpad;
+  const int16_t ichs = kchs;
+
+  const int out_channels_per_bank = ochs / DIM + (ochs % DIM != 0);
+  const int B_rows = out_channels_per_bank * kcols * krows * kchs;
+
+  const uint32_t A_sp_addr_start = 0;
+  const uint32_t B_sp_addr_start = BANK_NUM * BANK_ROWS - B_rows;
+  const uint32_t D_sp_addr_start = 1 << (ADDR_LEN - 1);
+  const uint32_t C_sp_addr_start = 3 << (ADDR_LEN - 2);
+
+  const uint32_t GARBAGE_ADDR = ~0;
+
+  // mvin bias
+  if (!no_bias && bias != 0) {
+    // TODO we probably don't need quite this many nested loops for this part
+
+    const int max_ochs_per_mvin = ochs < MAX_BLOCK_LEN_ACC * DIM ? ochs :
+      MAX_BLOCK_LEN_ACC * DIM;
+
+    // gemmini_extended4_config_ld(0, MVIN_SCALE_IDENTITY, false, batches * orows * ocols, 2);
+    config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
+      ((uint64_t)(batches * orows * ocols) << 16) |
+      (2 << 3) | 1,
+      0);
+
+    for (int b = 0; b < batches; b++)
+      for (int orow = 0; orow < orows; orow++)
+        for (int ocol = 0; ocol < ocols; ocol += DIM) {
+          const int I = ocols - ocol > DIM ? DIM : ocols - ocol;
+
+          for (int och = 0; och < ochs; och += max_ochs_per_mvin) {
+            const int J = ochs - och > max_ochs_per_mvin ? max_ochs_per_mvin : ochs - och;
+
+            const uint32_t D_sp_addr = D_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
+
+            mvin(bias + och * sizeof(acc_t),
+              ((uint64_t)I << 48) | ((uint64_t)J << 32) | D_sp_addr,
+              2);
+          }
+        }
+  }
+
+  // mvin input
+  {
+    const int16_t max_ichs_per_mvin = ichs < MAX_BLOCK_LEN * DIM ? ichs :
+      MAX_BLOCK_LEN * DIM;
+
+    // gemmini_extended4_config_ld(in_channels * sizeof(elem_t), MVIN_SCALE_IDENTITY, false, batches * irows * icols, 0);
+    config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
+      ((uint64_t)(batches * irows * icols) << 16) |
+      (0 << 3) | 1,
+      in_channels * sizeof(elem_t));
+
+    for (int16_t b = 0; b < batches; b++)
+      for (int16_t irow = -upad; irow < irows_unpadded + dpad; irow++) {
+        const int16_t irow_padded = irow + upad;
+
+        for (int16_t icol = -lpad; icol < icols_unpadded + rpad;) {
+          // TODO There might be some unnecessary mvins here at the edge of the image
+
+          int16_t I = icols_unpadded - icol > DIM ? DIM : icols_unpadded - icol;
+
+          if (icol < 0) {
+            I = -icol > DIM ? DIM : -icol;
+          } else if (icol >= icols_unpadded) {
+            I = icols_unpadded + rpad - icol > DIM ? DIM : icols_unpadded + rpad - icol;
+          }
+
+          const int16_t icol_padded = icol + lpad;
+
+          for (int16_t ich = 0; ich < ichs; ich += max_ichs_per_mvin) {
+            const int16_t K = ichs - ich > max_ichs_per_mvin ?
+              max_ichs_per_mvin : ichs - ich;
+
+            const uint32_t A_sp_addr = A_sp_addr_start + (ich / DIM) * batches * irows * icols + b * irows * icols + irow_padded * icols + icol_padded;
+
+            const bool is_zeros = irow < 0 || irow >= irows_unpadded || icol < 0 || icol >= icols_unpadded;
+
+            const uint64_t in = is_zeros ? NULL :
+              input + ((b*in_dim*in_dim + irow*in_dim + icol) * in_channels + ich) * sizeof(elem_t);
+
+            // gemmini_extended_mvin(in,
+            //     A_sp_addr,
+            //     K, I);
+            mvin(in,
+              ((uint64_t)I << 48) | ((uint64_t)K << 32) | A_sp_addr,
+              0);
+          }
+
+          icol += I;
+        }
+      }
+  }
+
+  // mvin weights
+  {
+    const uint16_t max_ochs_per_mvin = ochs < MAX_BLOCK_LEN * DIM ? ochs :
+      MAX_BLOCK_LEN * DIM;
+
+    // gemmini_extended4_config_ld(out_channels * sizeof(elem_t), MVIN_SCALE_IDENTITY, false, krows * kcols * kchs, 1);
+    config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
+      ((uint64_t)(krows * kcols * kchs) << 16) |
+      (1 << 3) | 1,
+      out_channels * sizeof(elem_t));
+
+    for (uint16_t och = 0; och < ochs; och += max_ochs_per_mvin) {
+      const uint16_t J = ochs - och > max_ochs_per_mvin ?
+        max_ochs_per_mvin : ochs - och;
+
+      for (uint16_t krow = 0; krow < krows; krow++)
+        for (uint16_t kcol = 0; kcol < kcols; kcol++)
+          for (uint16_t kch = 0; kch < kchs; kch += DIM) {
+            const uint16_t K = kchs - kch > DIM ? DIM : kchs - kch;
+
+            const uint32_t B_sp_addr = B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow * kcols * kchs + kcol * kchs + kch;
+
+            // gemmini_extended_mvin2(weights + (krow*kernel_dim*in_channels + kcol*in_channels + kch) * out_channels + och,
+            //   B_sp_addr,
+            //   J, K);
+
+            mvin(weights + ((krow*kernel_dim*in_channels + kcol*in_channels + kch) * out_channels + och)*sizeof(elem_t),
+              ((uint64_t)K << 48) | ((uint64_t)J << 32) | B_sp_addr,
+              1);
+          }
+    }
+  }
+
+  // Compute
+  for (uint16_t b = 0; b < batches; b++)
+    for (uint16_t orow = 0; orow < orows; orow++)
+      for (uint16_t ocol = 0; ocol < ocols; ocol += DIM) {
+        const uint16_t I = ocols - ocol > DIM ? DIM : ocols - ocol;
+
+        for (uint16_t och = 0; och < ochs; och += DIM) {
+          const uint16_t J = ochs - och > DIM ? DIM : ochs - och;
+
+          const uint32_t C_sp_addr = C_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
+
+          for (uint16_t krow = 0; krow < krows; krow++) {
+            const uint16_t irow = orow * stride + krow;
+
+            // for (uint16_t kcol = 0; kcol < kcols; kcol++) {
+            for (uint16_t kcol = 0; kcol < kcols; kcol++) {
+              const uint16_t icol = ocol * stride + kcol;
+
+              for (uint16_t kch = 0; kch < kchs; kch += DIM) {
+                // Over here, construct a new matrix
+                //
+                // Let us assume that we only ever operate on
+                // one pixel in one row.
+                // Thus, krow == kcol == 1
+                //
+                // Then, for every set of I, J, and K values
+                //   - I = ocol
+                //   - J = och
+                //   - K = kch
+
+                const uint16_t K = (kchs - kch > DIM ? DIM : kchs - kch);
+
+                const uint32_t A_sp_addr = A_sp_addr_start + (kch / DIM) * batches * irows * icols + b * irows * icols + irow * icols + icol;
+                const uint32_t B_sp_addr = B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow * kcols * kchs + kcol * kchs + kch;
+
+                // perform matmul
+                const uint32_t out_sp_addr =
+                  (bias != NULL && no_bias) && krow == 0 && kcol == 0 && kch == 0 ?
+                  C_sp_addr & ~((uint32_t)(1 << (ADDR_LEN - 2))) :
+                  C_sp_addr;
+
+                // gemmini_extended_preload(B_sp_addr, out_sp_addr,
+                //     J, K, J, I);
+                // gemmini_extended_compute_preloaded(A_sp_addr, GARBAGE_ADDR, K, I, J, I);
+
+                preload(((uint64_t)K << 48) | ((uint64_t)J << 32) | B_sp_addr,
+                    ((uint64_t)I << 48) | ((uint64_t)J << 32) | out_sp_addr);
+                compute(((uint64_t)I << 48) | ((uint64_t)K << 32) | A_sp_addr,
+                    ((uint64_t)I << 48) | ((uint64_t)J << 32) | GARBAGE_ADDR, 1);
+              }
+            }
+          }
+        }
+      }
+
+  if (output != NULL && no_pool) {
+    for (uint16_t b = 0; b < batches; b++)
+      for (uint16_t orow = 0; orow < orows; orow++)
+        for (uint16_t ocol = 0; ocol < ocols; ocol += DIM) {
+          const uint16_t I = ocols - ocol > DIM ? DIM : ocols - ocol;
+
+          for (uint16_t och = 0; och < ochs; och += DIM) {
+            const uint16_t J = ochs - och > DIM ? DIM : ochs - och;
+
+            const uint32_t C_sp_addr = C_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
+
+            mvout(output + ((b*out_dim*out_dim + orow*out_dim + ocol) * out_channels + och) * sizeof(elem_t),
+                ((uint64_t)I << 48) | ((uint64_t)J << 32) | C_sp_addr);
+          }
+        }
+  }
+}
+
+void gemmini_t::loop_conv_ws_config_1(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_conv_ws_batch_size = rs1 & 0xFFFF;
+  gemmini_state.loop_conv_ws_in_dim = (rs1 >> 16) & 0xFFFF;
+  gemmini_state.loop_conv_ws_in_channels = (rs1 >> 32) & 0xFFFF;
+  gemmini_state.loop_conv_ws_out_channels = (rs1 >> 48) & 0xFFFF;
+
+  gemmini_state.loop_conv_ws_out_dim = rs2 & 0xFFFF;
+  gemmini_state.loop_conv_ws_pool_out_dim = (rs2 >> 16) & 0xFFFF;
+  gemmini_state.loop_conv_ws_stride = (rs2 >> 32) & 0xFFFF;
+  gemmini_state.loop_conv_ws_padding = (rs2 >> 48) & 0xFFFF;
+}
+
+void gemmini_t::loop_conv_ws_config_2(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_conv_ws_kernel_dim = (rs1 >> 48) & 0xFFFF;
+  gemmini_state.loop_conv_ws_pool_size = (rs1 >> 32) & 0xFFFF;
+  gemmini_state.loop_conv_ws_pool_stride = (rs1 >> 16) & 0xFFFF;
+  gemmini_state.loop_conv_ws_pool_padding = rs1 & 0xFFFF;
+
+  gemmini_state.loop_conv_ws_batches = (rs2 >> 48) & 0xFFFF;
+  gemmini_state.loop_conv_ws_porows = (rs2 >> 32) & 0xFFFF;
+  gemmini_state.loop_conv_ws_pocols = (rs2 >> 16)  & 0xFFFF;
+  gemmini_state.loop_conv_ws_pochs = rs2 & 0xFFFF;
+}
+
+void gemmini_t::loop_conv_ws_config_3(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_conv_ws_krows = (rs1 >> 48) & 0xFFFF;
+  gemmini_state.loop_conv_ws_kcols = (rs1 >> 32) & 0xFFFF;
+  gemmini_state.loop_conv_ws_kchs = (rs1 >> 16) & 0xFFFF;
+  gemmini_state.loop_conv_ws_lpad = rs1 & 0xFFFF;
+
+  gemmini_state.loop_conv_ws_rpad = (rs2 >> 48) & 0xFFFF;
+  gemmini_state.loop_conv_ws_upad = (rs2 >> 32) & 0xFFFF;
+  gemmini_state.loop_conv_ws_dpad = (rs2 >> 16) & 0xFFFF;
+  gemmini_state.loop_conv_ws_plpad = rs2 & 0xFFFF;
+}
+
+void gemmini_t::loop_conv_ws_config_4(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_conv_ws_orows = (rs1  >> 48) & 0xFFFF;
+  gemmini_state.loop_conv_ws_prad = (rs1 >> 32) & 0xFFFF;
+  gemmini_state.loop_conv_ws_pupad = (rs1 >> 16) & 0xFFFF;
+  gemmini_state.loop_conv_ws_pdpad = rs1 & 0xFFFF;
+
+  gemmini_state.loop_conv_ws_ocols = rs2 & 0xFFFF;
+}
+
+void gemmini_t::loop_conv_ws_config_5(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_conv_ws_weights = rs1;
+  gemmini_state.loop_conv_ws_output = rs2;
+}
+
+void gemmini_t::loop_conv_ws_config_6(reg_t rs1, reg_t rs2) {
+  gemmini_state.loop_conv_ws_bias = rs1;
+  gemmini_state.loop_conv_ws_input = rs2;
+}
+
 reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   if (insn.funct == mvin_funct) {
     mvin(xs1, xs2, 0);
@@ -811,6 +1112,20 @@ reg_t gemmini_t::custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     loop_ws_config_strides_DC(xs1, xs2);
   } else if (insn.funct == loop_ws_funct) {
     loop_ws(xs1, xs2);
+  } else if (insn.funct == loop_conv_ws_config_1_funct) {
+    loop_conv_ws_config_1(xs1, xs2);
+  } else if (insn.funct == loop_conv_ws_config_2_funct) {
+    loop_conv_ws_config_2(xs1, xs2);
+  } else if (insn.funct == loop_conv_ws_config_3_funct) {
+    loop_conv_ws_config_3(xs1, xs2);
+  } else if (insn.funct == loop_conv_ws_config_4_funct) {
+    loop_conv_ws_config_4(xs1, xs2);
+  } else if (insn.funct == loop_conv_ws_config_5_funct) {
+    loop_conv_ws_config_5(xs1, xs2);
+  } else if (insn.funct == loop_conv_ws_config_6_funct) {
+    loop_conv_ws_config_6(xs1, xs2);
+  } else if (insn.funct == loop_conv_ws_funct) {
+    loop_conv_ws(xs1, xs2);
   }
   //==========================================================================
   // gemmini-cisc opcodes
