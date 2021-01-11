@@ -43,6 +43,7 @@ static void help(int exit_code = 1)
   fprintf(stderr, "                          The extlib flag for the library must come first.\n");
   fprintf(stderr, "  --log-cache-miss      Generate a log of cache miss\n");
   fprintf(stderr, "  --extension=<name>    Specify RoCC Extension\n");
+  fprintf(stderr, "                          This flag can be used multiple times.\n");
   fprintf(stderr, "  --extlib=<name>       Shared library to load\n");
   fprintf(stderr, "                        This flag can be used multiple times.\n");
   fprintf(stderr, "  --rbb-port=<port>     Listen on <port> for remote bitbang connection\n");
@@ -117,7 +118,7 @@ int main(int argc, char** argv)
   std::unique_ptr<cache_sim_t> l2;
   bool log_cache = false;
   bool log_commits = false;
-  std::function<extension_t*()> extension;
+  std::vector<std::function<extension_t*()>> extensions;
   const char* isa = DEFAULT_ISA;
   const char* varch = DEFAULT_VARCH;
   uint16_t rbb_port = 0;
@@ -209,7 +210,7 @@ int main(int argc, char** argv)
   parser.option(0, "isa", 1, [&](const char* s){isa = s;});
   parser.option(0, "varch", 1, [&](const char* s){varch = s;});
   parser.option(0, "device", 1, device_parser);
-  parser.option(0, "extension", 1, [&](const char* s){extension = find_extension(s);});
+  parser.option(0, "extension", 1, [&](const char* s){extensions.push_back(find_extension(s));});
   parser.option(0, "dump-dts", 0, [&](const char *s){dump_dts = true;});
   parser.option(0, "disable-dtb", 0, [&](const char *s){dtb_enabled = false;});
   parser.option(0, "extlib", 1, [&](const char *s){
@@ -269,8 +270,8 @@ int main(int argc, char** argv)
   {
     if (ic) s.get_core(i)->get_mmu()->register_memtracer(&*ic);
     if (dc) s.get_core(i)->get_mmu()->register_memtracer(&*dc);
-    if (extension) {
-      s.get_core(i)->register_extension(extension());
+    for (auto extension_iter = extensions.begin(); extension_iter != extensions.end(); extension_iter++) {
+      s.get_core(i)->register_extension((*extension_iter)());
       s.get_core(i)->reset();
     }
   }

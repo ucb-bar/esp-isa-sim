@@ -22,7 +22,7 @@
 
 processor_t::processor_t(const char* isa, const char* varch, simif_t* sim,
                          uint32_t id, bool halt_on_reset)
-  : debug(false), halt_request(false), sim(sim), ext(NULL), id(id),
+  : debug(false), halt_request(false), sim(sim), id(id),
   halt_on_reset(halt_on_reset), last_pc(1), executions(1)
 {
   VU.p = this;
@@ -32,8 +32,8 @@ processor_t::processor_t(const char* isa, const char* varch, simif_t* sim,
   mmu = new mmu_t(sim, this);
 
   disassembler = new disassembler_t(max_xlen);
-  if (ext)
-    for (auto disasm_insn : ext->get_disasms())
+  for (auto ext_iter = ext.begin(); ext_iter != ext.end(); ext_iter++)
+    for (auto disasm_insn : (*ext_iter)->get_disasms())
       disassembler->add_insn(disasm_insn);
 
   reset();
@@ -227,11 +227,28 @@ reg_t vectorUnit_t::set_vl(uint64_t regId, reg_t reqVL, reg_t newType){
   return vl;
 }
 
+extension_t* processor_t::get_extension(const char* name) {
+  extension_t* res;
+  if (ext.size() == 0) return NULL;
+  if (ext.size() == 1 && name == NULL) {
+    // Deprecated message
+    fprintf(stderr, "WARNING: get_extension() call without extension name is deprecated.");
+    fprintf(stderr, " please call this function with your extension's name.\n");
+    return ext[0];
+  }
+  if (name == NULL) {
+    fprintf(stderr, "get_extension() call without extension name is not supported with multiple extensions.");
+    fprintf(stderr, " please call this function with your extension's name.\n");
+    abort();
+  }
+  return ext[ext_indices[std::string(name)]];
+}
+
 void processor_t::set_debug(bool value)
 {
   debug = value;
-  if (ext)
-    ext->set_debug(value);
+  for (auto ext_iter = ext.begin(); ext_iter != ext.end(); ext_iter++)
+    (*ext_iter)->set_debug(value);
 }
 
 void processor_t::set_histogram(bool value)
@@ -266,8 +283,8 @@ void processor_t::reset()
   set_csr(CSR_MSTATUS, state.mstatus);
   VU.reset();
 
-  if (ext)
-    ext->reset(); // reset the extension
+  for (auto ext_iter = ext.begin(); ext_iter != ext.end(); ext_iter++)
+    (*ext_iter)->reset(); // reset the extension
 
   if (sim)
     sim->proc_reset(id);
@@ -448,7 +465,7 @@ void processor_t::set_csr(int which, reg_t val)
 {
   val = zext_xlen(val);
   reg_t delegable_ints = MIP_SSIP | MIP_STIP | MIP_SEIP
-                       | ((ext != NULL) << IRQ_COP);
+                       | ((ext.size() != 0) << IRQ_COP);
   reg_t all_ints = delegable_ints | MIP_MSIP | MIP_MTIP;
 
   if (which >= CSR_PMPADDR0 && which < CSR_PMPADDR0 + state.n_pmp) {
@@ -497,7 +514,7 @@ void processor_t::set_csr(int which, reg_t val)
                  | MSTATUS_FS | MSTATUS_MPRV | MSTATUS_SUM
                  | MSTATUS_MXR | MSTATUS_TW | MSTATUS_TVM
                  | MSTATUS_TSR | MSTATUS_UXL | MSTATUS_SXL |
-                 (ext ? MSTATUS_XS : 0);
+                 (ext.size() ? MSTATUS_XS : 0);
 
       reg_t requested_mpp = legalize_privilege(get_field(val, MSTATUS_MPP));
       state.mstatus = set_field(state.mstatus, MSTATUS_MPP, requested_mpp);
@@ -941,9 +958,8 @@ void processor_t::register_extension(extension_t* x)
   build_opcode_map();
   for (auto disasm_insn : x->get_disasms())
     disassembler->add_insn(disasm_insn, true);
-  if (ext != NULL)
-    throw std::logic_error("only one extension may be registered");
-  ext = x;
+  ext_indices.insert({std::string(x->name()), ext.size()});
+  ext.push_back(x);
   x->set_processor(this);
 }
 
