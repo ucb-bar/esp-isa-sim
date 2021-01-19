@@ -56,10 +56,12 @@ struct gemmini_state_t
   std::vector<std::vector<acc_t>> *accumulator;
 };
 
-class gemmini_t : public rocc_t
+class gemmini_t : public extension_t
 {
 public:
-  gemmini_t() : cause(0), aux(0), debug(false) {}
+  gemmini_t() : cause(0), aux(0), debug(false) {
+    printf("gemmini constructed");
+  }
   const char* name() { return "gemmini"; }
   reg_t custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2);
   void reset();
@@ -69,6 +71,9 @@ public:
   void preload(reg_t bd_addr, reg_t c_addr);
   void config(reg_t rs1, reg_t rs2);
   void compute(reg_t a_addr, reg_t bd_addr, bool preload);
+
+  virtual std::vector<insn_desc_t> get_instructions();
+  virtual std::vector<disasm_insn_t*> get_disasms();
 
 private:
   gemmini_state_t gemmini_state;

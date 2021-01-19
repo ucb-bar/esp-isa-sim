@@ -241,7 +241,7 @@ extension_t* processor_t::get_extension(const char* name) {
     fprintf(stderr, " please call this function with your extension's name.\n");
     abort();
   }
-  return ext[ext_indices[std::string(name)]];
+  return ext[ext_indices.at(std::string(name))];
 }
 
 void processor_t::set_debug(bool value)
