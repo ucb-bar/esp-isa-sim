@@ -4,6 +4,7 @@
 #include "mmu.h"
 #include "dts.h"
 #include "remote_bitbang.h"
+#include "byteorder.h"
 #include <map>
 #include <iostream>
 #include <sstream>
@@ -24,16 +25,21 @@ static void handle_signal(int sig)
   signal(sig, &handle_signal);
 }
 
-sim_t::sim_t(const char* isa, const char* varch, size_t nprocs, bool halted,
+sim_t::sim_t(const char* isa, const char* priv, const char* varch,
+             size_t nprocs, bool halted, bool real_time_clint,
+             reg_t initrd_start, reg_t initrd_end,
              reg_t start_pc, std::vector<std::pair<reg_t, mem_t*>> mems,
              std::vector<std::pair<reg_t, abstract_device_t*>> plugin_devices,
              const std::vector<std::string>& args,
              std::vector<int> const hartids,
-             const debug_module_config_t &dm_config)
+             const debug_module_config_t &dm_config,
+             const char *log_path)
   : htif_t(args), mems(mems), plugin_devices(plugin_devices),
-    procs(std::max(nprocs, size_t(1))), start_pc(start_pc), current_step(0),
-    current_proc(0), debug(false), histogram_enabled(false),
-    log_commits_enabled(false), dtb_enabled(true),
+    procs(std::max(nprocs, size_t(1))),
+    initrd_start(initrd_start), initrd_end(initrd_end), start_pc(start_pc),
+    log_file(log_path),
+    current_step(0), current_proc(0), debug(false), histogram_enabled(false),
+    log(false), dtb_enabled(true),
     remote_bitbang(NULL), debug_module(this, dm_config)
 {
   signal(SIGINT, &handle_signal);
@@ -48,22 +54,21 @@ sim_t::sim_t(const char* isa, const char* varch, size_t nprocs, bool halted,
 
   debug_mmu = new mmu_t(this, NULL);
 
-  if (hartids.size() == 0) {
-    for (size_t i = 0; i < procs.size(); i++) {
-      procs[i] = new processor_t(isa, varch, this, i, halted);
-    }
-  }
-  else {
-    if (hartids.size() != procs.size()) {
-      std::cerr << "Number of specified hartids doesn't match number of processors" << strerror(errno) << std::endl;
+  if (! (hartids.empty() || hartids.size() == nprocs)) {
+      std::cerr << "Number of specified hartids ("
+                << hartids.size()
+                << ") doesn't match number of processors ("
+                << nprocs << ").\n";
       exit(1);
-    }
-    for (size_t i = 0; i < procs.size(); i++) {
-      procs[i] = new processor_t(isa, varch, this, hartids[i], halted);
-    }
   }
 
-  clint.reset(new clint_t(procs));
+  for (size_t i = 0; i < nprocs; i++) {
+    int hart_id = hartids.empty() ? i : hartids[i];
+    procs[i] = new processor_t(isa, priv, varch, this, hart_id, halted,
+                               log_file.get());
+  }
+
+  clint.reset(new clint_t(procs, CPU_HZ / INSNS_PER_RTC_TICK, real_time_clint));
   bus.add_device(CLINT_BASE, clint.get());
 }
 
@@ -130,11 +135,6 @@ void sim_t::set_debug(bool value)
   debug = value;
 }
 
-void sim_t::set_log(bool value)
-{
-  log = value;
-}
-
 void sim_t::set_histogram(bool value)
 {
   histogram_enabled = value;
@@ -143,12 +143,24 @@ void sim_t::set_histogram(bool value)
   }
 }
 
-void sim_t::set_log_commits(bool value)
+void sim_t::configure_log(bool enable_log, bool enable_commitlog)
 {
-  log_commits_enabled = value;
-  for (size_t i = 0; i < procs.size(); i++) {
-    procs[i]->set_log_commits(log_commits_enabled);
+  log = enable_log;
+
+  if (!enable_commitlog)
+    return;
+
+#ifndef RISCV_ENABLE_COMMITLOG
+  fputs("Commit logging support has not been properly enabled; "
+        "please re-build the riscv-isa-sim project using "
+        "\"configure --enable-commitlog\".\n",
+        stderr);
+  abort();
+#else
+  for (processor_t *proc : procs) {
+    proc->enable_log_commits();
   }
+#endif
 }
 
 void sim_t::set_procs_debug(bool value)
@@ -157,16 +169,21 @@ void sim_t::set_procs_debug(bool value)
     procs[i]->set_debug(value);
 }
 
+static bool paddr_ok(reg_t addr)
+{
+  return (addr >> MAX_PADDR_BITS) == 0;
+}
+
 bool sim_t::mmio_load(reg_t addr, size_t len, uint8_t* bytes)
 {
-  if (addr + len < addr)
+  if (addr + len < addr || !paddr_ok(addr + len - 1))
     return false;
   return bus.load(addr, len, bytes);
 }
 
 bool sim_t::mmio_store(reg_t addr, size_t len, const uint8_t* bytes)
 {
-  if (addr + len < addr)
+  if (addr + len < addr || !paddr_ok(addr + len - 1))
     return false;
   return bus.store(addr, len, bytes);
 }
@@ -189,10 +206,12 @@ void sim_t::make_dtb()
     (uint32_t) (start_pc & 0xffffffff),
     (uint32_t) (start_pc >> 32)
   };
+  for(int i = 0; i < reset_vec_size; i++)
+    reset_vec[i] = to_le(reset_vec[i]);
 
   std::vector<char> rom((char*)reset_vec, (char*)reset_vec + sizeof(reset_vec));
 
-  dts = make_dts(INSNS_PER_RTC_TICK, CPU_HZ, procs, mems);
+  dts = make_dts(INSNS_PER_RTC_TICK, CPU_HZ, initrd_start, initrd_end, procs, mems);
   std::string dtb = dts_compile(dts);
 
   rom.insert(rom.end(), dtb.begin(), dtb.end());
@@ -204,6 +223,8 @@ void sim_t::make_dtb()
 }
 
 char* sim_t::addr_to_mem(reg_t addr) {
+  if (!paddr_ok(addr))
+    return NULL;
   auto desc = bus.find_device(addr);
   if (auto mem = dynamic_cast<mem_t*>(desc.second))
     if (addr - desc.first < mem->size())
@@ -227,7 +248,7 @@ void sim_t::idle()
 void sim_t::read_chunk(addr_t taddr, size_t len, void* dst)
 {
   assert(len == 8);
-  auto data = debug_mmu->load_uint64(taddr);
+  auto data = to_le(debug_mmu->load_uint64(taddr));
   memcpy(dst, &data, sizeof data);
 }
 
@@ -236,7 +257,7 @@ void sim_t::write_chunk(addr_t taddr, size_t len, const void* src)
   assert(len == 8);
   uint64_t data;
   memcpy(&data, src, sizeof data);
-  debug_mmu->store_uint64(taddr, data);
+  debug_mmu->store_uint64(taddr, from_le(data));
 }
 
 void sim_t::proc_reset(unsigned id)

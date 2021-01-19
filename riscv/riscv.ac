@@ -6,11 +6,17 @@ AC_ARG_WITH(isa,
   AC_DEFINE_UNQUOTED([DEFAULT_ISA], "$withval", [Default value for --isa switch]),
   AC_DEFINE_UNQUOTED([DEFAULT_ISA], "RV64IMAFDC", [Default value for --isa switch]))
 
+AC_ARG_WITH(priv,
+	[AS_HELP_STRING([--with-priv=MSU],
+		[Sets the default RISC-V privilege modes supported])],
+  AC_DEFINE_UNQUOTED([DEFAULT_PRIV], "$withval", [Default value for --priv switch]),
+  AC_DEFINE_UNQUOTED([DEFAULT_PRIV], "MSU", [Default value for --priv switch]))
+
 AC_ARG_WITH(varch,
-	[AS_HELP_STRING([--with-varch=v128:e32:s128],
+	[AS_HELP_STRING([--with-varch=vlen:128,elen:64,slen:128],
 		[Sets the default vector config])],
   AC_DEFINE_UNQUOTED([DEFAULT_VARCH], "$withval", [Default value for --varch switch]),
-  AC_DEFINE_UNQUOTED([DEFAULT_VARCH], "v128:e32:s128", [Default value for --varch switch]))
+  AC_DEFINE_UNQUOTED([DEFAULT_VARCH], "vlen:128,elen:64,slen:128", [Default value for --varch switch]))
 
 
 AC_SEARCH_LIBS([dlopen], [dl dld], [], [

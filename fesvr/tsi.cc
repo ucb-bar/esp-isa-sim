@@ -126,7 +126,7 @@ void tsi_t::tick(bool out_valid, uint32_t out_bits, bool in_ready)
 bool tsi_t::is_address_preloaded(addr_t taddr, size_t len)
 {
   if(loadmem)
-    return taddr > loadmem_addr;
+    return taddr >= loadmem_addr;
   else
     return false;
 }

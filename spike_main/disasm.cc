@@ -768,17 +768,17 @@ disassembler_t::disassembler_t(int xlen)
       {"vssseg%dw.v", {&vs3, &v_address, &xrs2, &opt, &vm}},
       {"vssseg%de.v", {&vs3, &v_address, &xrs2, &opt, &vm}},
 
-      {"vlseg%db.v", {&vd, &v_address, &vs2, &opt, &vm}},
-      {"vlseg%dh.v", {&vd, &v_address, &vs2, &opt, &vm}},
-      {"vlseg%dw.v", {&vd, &v_address, &vs2, &opt, &vm}},
-      {"vlseg%de.v", {&vd, &v_address, &vs2, &opt, &vm}},
-      {"vlseg%dwu.v",{&vd, &v_address, &vs2, &opt, &vm}},
-      {"vlseg%dhu.v",{&vd, &v_address, &vs2, &opt, &vm}},
-      {"vlseg%dbu.v",{&vd, &v_address, &vs2, &opt, &vm}},
-      {"vsseg%db.v", {&vs3, &v_address, &vs2, &opt, &vm}},
-      {"vsseg%dh.v", {&vs3, &v_address, &vs2, &opt, &vm}},
-      {"vsseg%dw.v", {&vs3, &v_address, &vs2, &opt, &vm}},
-      {"vsseg%de.v", {&vs3, &v_address, &vs2, &opt, &vm}},
+      {"vlxseg%db.v", {&vd, &v_address, &vs2, &opt, &vm}},
+      {"vlxseg%dh.v", {&vd, &v_address, &vs2, &opt, &vm}},
+      {"vlxseg%dw.v", {&vd, &v_address, &vs2, &opt, &vm}},
+      {"vlxseg%de.v", {&vd, &v_address, &vs2, &opt, &vm}},
+      {"vlxseg%dwu.v",{&vd, &v_address, &vs2, &opt, &vm}},
+      {"vlxseg%dhu.v",{&vd, &v_address, &vs2, &opt, &vm}},
+      {"vlxseg%dbu.v",{&vd, &v_address, &vs2, &opt, &vm}},
+      {"vsxseg%db.v", {&vs3, &v_address, &vs2, &opt, &vm}},
+      {"vsxseg%dh.v", {&vs3, &v_address, &vs2, &opt, &vm}},
+      {"vsxseg%dw.v", {&vs3, &v_address, &vs2, &opt, &vm}},
+      {"vsxseg%de.v", {&vs3, &v_address, &vs2, &opt, &vm}},
 
       {"vlseg%dbff.v", {&vd, &v_address, &opt, &vm}},
       {"vlseg%dhff.v", {&vd, &v_address, &opt, &vm}},
@@ -788,6 +788,8 @@ disassembler_t::disassembler_t(int xlen)
       {"vlseg%dhuff.v",{&vd, &v_address, &opt, &vm}},
       {"vlseg%dbuff.v",{&vd, &v_address, &opt, &vm}},
     };
+
+
 
     for (size_t idx_insn = 0; idx_insn < sizeof(insn_code) / sizeof(insn_code[0]); ++idx_insn) {
       const reg_t match_nf = nf << 29;
@@ -801,18 +803,24 @@ disassembler_t::disassembler_t(int xlen)
     }
   }
 
+  DISASM_INSN("vl1r.v", vl1r_v, 0, {&vd, &v_address});
+  DISASM_INSN("vs1r.v", vs1r_v, 0, {&vs3, &v_address});
 
-  #define DISASM_OPIV_VXI_INSN(name, sign) \
-    add_insn(new disasm_insn_t(#name ".vv", match_##name##_vv, mask_##name##_vv, \
+  #define DISASM_OPIV_VXI_INSN(name, sign, suf) \
+    add_insn(new disasm_insn_t(#name "." #suf "v", \
+                match_##name##_##suf##v, mask_##name##_##suf##v, \
                 {&vd, &vs2, &vs1, &opt, &vm})); \
-    add_insn(new disasm_insn_t(#name ".vx", match_##name##_vx, mask_##name##_vx, \
+    add_insn(new disasm_insn_t(#name "." #suf "x", \
+                match_##name##_##suf##x, mask_##name##_##suf##x, \
                 {&vd, &vs2, &xrs1, &opt, &vm})); \
     if (sign) \
-    add_insn(new disasm_insn_t(#name ".vi", match_##name##_vi, mask_##name##_vi, \
+    add_insn(new disasm_insn_t(#name "." #suf "i", \
+                match_##name##_##suf##i, mask_##name##_##suf##i, \
                 {&vd, &vs2, &v_simm5, &opt, &vm})); \
     else \
-    add_insn(new disasm_insn_t(#name ".vi", match_##name##_vi, mask_##name##_vi, \
-                  {&vd, &vs2, &zimm5, &opt, &vm}));
+    add_insn(new disasm_insn_t(#name "." #suf "i", \
+                match_##name##_##suf##i, mask_##name##_##suf##i, \
+                {&vd, &vs2, &zimm5, &opt, &vm}));
 
   #define DISASM_OPIV_VX__INSN(name, sign) \
     add_insn(new disasm_insn_t(#name ".vv", match_##name##_vv, mask_##name##_vv, \
@@ -866,19 +874,19 @@ disassembler_t::disassembler_t(int xlen)
 
   //OPFVV/OPFVF
   //0b00_0000
-  DISASM_OPIV_VXI_INSN(vadd,      1);
+  DISASM_OPIV_VXI_INSN(vadd,      1, v);
   DISASM_OPIV_VX__INSN(vsub,      1);
   DISASM_OPIV__XI_INSN(vrsub,     1);
   DISASM_OPIV_VX__INSN(vminu,     0);
   DISASM_OPIV_VX__INSN(vmin,      1);
   DISASM_OPIV_VX__INSN(vmaxu,     1);
   DISASM_OPIV_VX__INSN(vmax,      0);
-  DISASM_OPIV_VXI_INSN(vand,      1);
-  DISASM_OPIV_VXI_INSN(vor,       1);
-  DISASM_OPIV_VXI_INSN(vxor,      1);
-  DISASM_OPIV_VXI_INSN(vrgather,  0);
-  DISASM_OPIV__XI_INSN(vslideup,  1);
-  DISASM_OPIV__XI_INSN(vslidedown,1);
+  DISASM_OPIV_VXI_INSN(vand,      1, v);
+  DISASM_OPIV_VXI_INSN(vor,       1, v);
+  DISASM_OPIV_VXI_INSN(vxor,      1, v);
+  DISASM_OPIV_VXI_INSN(vrgather,  0, v);
+  DISASM_OPIV__XI_INSN(vslideup,  0);
+  DISASM_OPIV__XI_INSN(vslidedown,0);
 
   //0b01_0000
   DISASM_OPIV_VXIM_INSN(vadc,    1);
@@ -889,45 +897,52 @@ disassembler_t::disassembler_t(int xlen)
   DISASM_INSN("vmv.v.i", vmv_v_i, 0, {&vd, &v_simm5});
   DISASM_INSN("vmv.v.v", vmv_v_v, 0, {&vd, &vs1});
   DISASM_INSN("vmv.v.x", vmv_v_x, 0, {&vd, &xrs1});
-  DISASM_OPIV_VXI_INSN(vmseq,     1);
-  DISASM_OPIV_VXI_INSN(vmsne,     1);
+  DISASM_OPIV_VXI_INSN(vmseq,     1, v);
+  DISASM_OPIV_VXI_INSN(vmsne,     1, v);
   DISASM_OPIV_VX__INSN(vmsltu,    0);
   DISASM_OPIV_VX__INSN(vmslt,     1);
-  DISASM_OPIV_VXI_INSN(vmsleu,    0);
-  DISASM_OPIV_VXI_INSN(vmsle,     1);
+  DISASM_OPIV_VXI_INSN(vmsleu,    0, v);
+  DISASM_OPIV_VXI_INSN(vmsle,     1, v);
   DISASM_OPIV__XI_INSN(vmsgtu,    0);
   DISASM_OPIV__XI_INSN(vmsgt,     1);
 
   //0b10_0000
-  DISASM_OPIV_VXI_INSN(vsaddu,    0);
-  DISASM_OPIV_VXI_INSN(vsadd,     1);
+  DISASM_OPIV_VXI_INSN(vsaddu,    0, v);
+  DISASM_OPIV_VXI_INSN(vsadd,     1, v);
   DISASM_OPIV_VX__INSN(vssubu,    0);
   DISASM_OPIV_VX__INSN(vssub,     1);
-  DISASM_OPIV_VXI_INSN(vaadd,     1);
-  DISASM_OPIV_VXI_INSN(vsll,      1);
-  DISASM_OPIV_VX__INSN(vasub,     1);
+  DISASM_OPIV_VXI_INSN(vsll,      1, v);
+  DISASM_INSN("vmv1r.v", vmv1r_v, 0, {&vd, &vs2});
+  DISASM_INSN("vmv2r.v", vmv2r_v, 0, {&vd, &vs2});
+  DISASM_INSN("vmv4r.v", vmv4r_v, 0, {&vd, &vs2});
+  DISASM_INSN("vmv8r.v", vmv8r_v, 0, {&vd, &vs2});
   DISASM_OPIV_VX__INSN(vsmul,     1);
-  DISASM_OPIV_VXI_INSN(vsrl,      0);
-  DISASM_OPIV_VXI_INSN(vsra,      0);
-  DISASM_OPIV_VXI_INSN(vssrl,     0);
-  DISASM_OPIV_VXI_INSN(vssra,     0);
-  DISASM_OPIV_VXI_INSN(vnsrl,     0);
-  DISASM_OPIV_VXI_INSN(vnsra,     0);
-  DISASM_OPIV_VXI_INSN(vnclipu,   0);
-  DISASM_OPIV_VXI_INSN(vnclip,    1);
+  DISASM_OPIV_VXI_INSN(vsrl,      0, v);
+  DISASM_OPIV_VXI_INSN(vsra,      0, v);
+  DISASM_OPIV_VXI_INSN(vssrl,     0, v);
+  DISASM_OPIV_VXI_INSN(vssra,     0, v);
+  DISASM_OPIV_VXI_INSN(vnsrl,     0, w);
+  DISASM_OPIV_VXI_INSN(vnsra,     0, w);
+  DISASM_OPIV_VXI_INSN(vnclipu,   0, w);
+  DISASM_OPIV_VXI_INSN(vnclip,    0, w);
 
   //0b11_0000
   DISASM_OPIV_S___INSN(vwredsumu, 0);
   DISASM_OPIV_S___INSN(vwredsum,  1);
   DISASM_OPIV_V___INSN(vdotu,     0);
   DISASM_OPIV_V___INSN(vdot,      1);
-  DISASM_OPIV_VX__INSN(vwsmaccu,  0);
-  DISASM_OPIV_VX__INSN(vwsmacc,   1);
-  DISASM_OPIV_VX__INSN(vwsmaccsu, 0);
-  DISASM_OPIV__X__INSN(vwsmaccus, 1);
+  DISASM_OPIV_VX__INSN(vqmaccu,   0);
+  DISASM_OPIV_VX__INSN(vqmacc,    1);
+  DISASM_OPIV__X__INSN(vqmaccus,  1);
+  DISASM_OPIV_VX__INSN(vqmaccsu,  0);
 
   //OPMVV/OPMVX
   //0b00_0000
+  DISASM_OPIV_VX__INSN(vaaddu,    0);
+  DISASM_OPIV_VX__INSN(vaadd,     0);
+  DISASM_OPIV_VX__INSN(vasubu,    0);
+  DISASM_OPIV_VX__INSN(vasub,     0);
+
   DISASM_OPIV_S___INSN(vredsum,   1);
   DISASM_OPIV_S___INSN(vredand,   1);
   DISASM_OPIV_S___INSN(vredor,    1);
@@ -990,8 +1005,8 @@ disassembler_t::disassembler_t(int xlen)
   DISASM_OPIV_VX__INSN(vwmul,     1);
   DISASM_OPIV_VX__INSN(vwmaccu,   0);
   DISASM_OPIV_VX__INSN(vwmacc,    1);
-  DISASM_OPIV_VX__INSN(vwmaccsu,  0);
   DISASM_OPIV__X__INSN(vwmaccus,  1);
+  DISASM_OPIV_VX__INSN(vwmaccsu,  0);
 
   #undef DISASM_OPIV_VXI_INSN
   #undef DISASM_OPIV_VX__INSN
@@ -1028,15 +1043,19 @@ disassembler_t::disassembler_t(int xlen)
     add_insn(new disasm_insn_t(#name ".vf", match_##name##_vf, mask_##name##_vf, \
                 {&vd, &vs2, &frs1, &opt, &vm})); \
 
-  #define DISASM_VFUNARY0_INSN(name, extra) \
-    add_insn(new disasm_insn_t(#name "cvt.xu.f.v", match_##name##cvt_xu_f_v, \
-                mask_##name##cvt_xu_f_v, {&vd, &vs2, &opt, &vm})); \
-    add_insn(new disasm_insn_t(#name "cvt.x.f.v", match_##name##cvt_x_f_v, \
-                mask_##name##cvt_x_f_v, {&vd, &vs2, &opt, &vm})); \
-    add_insn(new disasm_insn_t(#name "cvt.f.xu.v", match_##name##cvt_f_xu_v, \
-                mask_##name##cvt_f_xu_v, {&vd, &vs2, &opt, &vm})); \
-    add_insn(new disasm_insn_t(#name "cvt.f.x.v", match_##name##cvt_f_x_v, \
-                mask_##name##cvt_f_x_v, {&vd, &vs2, &opt, &vm}));
+  #define DISASM_VFUNARY0_INSN(name, suf) \
+    add_insn(new disasm_insn_t(#name "cvt.xu.f." #suf, \
+                match_##name##cvt_xu_f_##suf, mask_##name##cvt_xu_f_##suf, \
+                {&vd, &vs2, &opt, &vm})); \
+    add_insn(new disasm_insn_t(#name "cvt.x.f." #suf, \
+                match_##name##cvt_x_f_##suf, mask_##name##cvt_x_f_##suf, \
+                {&vd, &vs2, &opt, &vm})); \
+    add_insn(new disasm_insn_t(#name "cvt.f.xu." #suf, \
+                match_##name##cvt_f_xu_##suf, mask_##name##cvt_f_xu_##suf, \
+                {&vd, &vs2, &opt, &vm})); \
+    add_insn(new disasm_insn_t(#name "cvt.f.x." #suf, \
+                match_##name##cvt_f_x_##suf, mask_##name##cvt_f_x_##suf, \
+                {&vd, &vs2, &opt, &vm})); \
 
   //OPFVV/OPFVF
   //0b01_0000
@@ -1059,7 +1078,6 @@ disassembler_t::disassembler_t(int xlen)
   DISASM_INSN("vfmv.v.f", vfmv_v_f, 0, {&vd, &frs1});
   DISASM_OPIV_VF_INSN(vmfeq);
   DISASM_OPIV_VF_INSN(vmfle);
-  DISASM_OPIV_VF_INSN(vmford);
   DISASM_OPIV_VF_INSN(vmflt);
   DISASM_OPIV_VF_INSN(vmfne);
   DISASM_OPIV__F_INSN(vmfgt);
@@ -1070,13 +1088,14 @@ disassembler_t::disassembler_t(int xlen)
   DISASM_OPIV__F_INSN(vfrdiv);
 
   //vfunary0
-  DISASM_VFUNARY0_INSN(vf,  0);
+  DISASM_VFUNARY0_INSN(vf,  v);
 
-  DISASM_VFUNARY0_INSN(vfw, 1);
+  DISASM_VFUNARY0_INSN(vfw, v);
   DISASM_INSN("vfwcvt.f.f.v", vfwcvt_f_f_v, 0, {&vd, &vs2, &opt, &vm});
 
-  DISASM_VFUNARY0_INSN(vfn, 1);
-  DISASM_INSN("vfncvt.f.f.v", vfncvt_f_f_v, 0, {&vd, &vs2, &opt, &vm});
+  DISASM_VFUNARY0_INSN(vfn, w);
+  DISASM_INSN("vfncvt.f.f.w", vfncvt_rod_f_f_w, 0, {&vd, &vs2, &opt, &vm});
+  DISASM_INSN("vfncvt.rod.f.f.w", vfncvt_rod_f_f_w, 0, {&vd, &vs2, &opt, &vm});
 
   //vfunary1
   DISASM_INSN("vfsqrt.v", vfsqrt_v, 0, {&vd, &vs2, &opt, &vm});
@@ -1152,7 +1171,7 @@ const disasm_insn_t* disassembler_t::lookup(insn_t insn) const
   return NULL;
 }
 
-void disassembler_t::add_insn(disasm_insn_t* insn, bool priority)
+void NOINLINE disassembler_t::add_insn(disasm_insn_t* insn, bool priority)
 {
   size_t idx = HASH_SIZE;
   if (insn->get_mask() % HASH_SIZE == HASH_SIZE - 1)
