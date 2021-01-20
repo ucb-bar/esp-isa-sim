@@ -279,6 +279,12 @@ int main(int argc, char** argv)
   if (mems.empty())
     mems = make_mems("2048");
 
+  if (extensions.size() > 1) {
+    fprintf(stderr, "WARNING: You are using multiple extensions.\n");
+    fprintf(stderr, "Overlapping instruction opcode definitions from\n");
+    fprintf(stderr, "different extensions can result in undefined behavior.\n\n");
+  }
+
   if (!*argv1)
     help();
 
