@@ -74,9 +74,7 @@ struct gemmini_state_t
 class gemmini_t : public extension_t
 {
 public:
-  gemmini_t() : cause(0), aux(0), debug(false) {
-    printf("gemmini constructed");
-  }
+  gemmini_t() : cause(0), aux(0), debug(false) {}
   const char* name() { return "gemmini"; }
   reg_t custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2);
   void reset();
