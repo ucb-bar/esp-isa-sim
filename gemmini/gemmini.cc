@@ -490,7 +490,10 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
         }
 
         if (gemmini_state.mode == gemmini_state_t::WS) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
           results.at(i).at(j) += a * gemmini_state.pe_state.at(k).at(j);
+#pragma GCC diagnostic pop
         } else {
           elem_t b = 0;
           if (~bd_addr_real != 0) {
@@ -833,10 +836,21 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const int out_channels_per_bank = ochs / DIM + (ochs % DIM != 0);
   const int B_rows = out_channels_per_bank * kcols * krows * kchs;
 
+  static uint32_t D_sp_addr_row = 0;
+  static uint32_t C_sp_addr_row = 0;
+
   const uint32_t A_sp_addr_start = 0;
   const uint32_t B_sp_addr_start = BANK_NUM * BANK_ROWS - B_rows;
-  const uint32_t D_sp_addr_start = 1 << (ADDR_LEN - 1);
-  const uint32_t C_sp_addr_start = 3 << (ADDR_LEN - 2);
+  const uint32_t D_sp_addr_start = (1 << (ADDR_LEN - 1)) + D_sp_addr_row;
+  const uint32_t C_sp_addr_start = (3 << (ADDR_LEN - 2)) + C_sp_addr_row;
+
+  if (bias != 0) {
+    D_sp_addr_row = (D_sp_addr_row + ACC_ROWS / 2) % ACC_ROWS;
+  }
+
+  if (output != 0) {
+    C_sp_addr_row = (C_sp_addr_row + ACC_ROWS / 2) % ACC_ROWS;
+  }
 
   const uint32_t GARBAGE_ADDR = ~0;
 
@@ -906,7 +920,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
             const bool is_zeros = irow < 0 || irow >= irows_unpadded || icol < 0 || icol >= icols_unpadded;
 
-            const uint64_t in = is_zeros ? NULL :
+            const uint64_t in = is_zeros ? 0 :
               input + ((b*in_dim*in_dim + irow*in_dim + icol) * in_channels + ich) * sizeof(elem_t);
 
             // gemmini_extended_mvin(in,
@@ -992,7 +1006,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
                 // perform matmul
                 const uint32_t out_sp_addr =
-                  (bias != NULL && no_bias) && krow == 0 && kcol == 0 && kch == 0 ?
+                  (bias != 0 && no_bias) && krow == 0 && kcol == 0 && kch == 0 ?
                   C_sp_addr & ~((uint32_t)(1 << (ADDR_LEN - 2))) :
                   C_sp_addr;
 
@@ -1010,7 +1024,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
         }
       }
 
-  if (output != NULL && no_pool) {
+  if (output != 0 && no_pool) {
     for (uint16_t b = 0; b < batches; b++)
       for (uint16_t orow = 0; orow < orows; orow++)
         for (uint16_t ocol = 0; ocol < ocols; ocol += DIM) {
