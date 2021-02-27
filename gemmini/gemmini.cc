@@ -1083,7 +1083,7 @@ void gemmini_t::loop_conv_ws_config_6(reg_t rs1, reg_t rs2) {
   gemmini_state.loop_conv_ws_input = rs2;
 }
 
-reg_t gemmini_t::CUSTOMFN(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
+reg_t gemmini_t::CUSTOMFN(XCUSTOM_ACC)(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   if (insn.funct == mvin_funct) {
     mvin(xs1, xs2, 0);
   } else if (insn.funct == mvin2_funct) {
