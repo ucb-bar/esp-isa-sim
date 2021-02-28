@@ -205,6 +205,8 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   auto const cols = (sp_addr >> addr_len) & 0xFFFF;
   auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
 
+  const int block_stride = DIM;
+
   dprintf("GEMMINI: mvout - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, base_row_addr, dram_addr);
 
   if (gemmini_state.pool_stride == 0) {
@@ -212,8 +214,12 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
       auto const dram_row_addr = dram_addr + i*gemmini_state.store_stride;
 
       for (size_t j = 0; j < cols; ++j) {
+        const size_t block = j / DIM;
+        const size_t spad_col = j % DIM;
+        const size_t spad_row = base_row_addr + block*block_stride + i;
+
         if (accumulator) { // Apply shift and activation when moving out of accumulator
-          acc_t acc_value = gemmini_state.accumulator.at(base_row_addr + i).at(j);
+          acc_t acc_value = gemmini_state.accumulator.at(spad_row).at(spad_col);
           auto shifted = acc_scale(acc_value, gemmini_state.acc_shift);
           elem_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
 
@@ -239,7 +245,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
 #endif
         } else { // Scratchpad, write to DRAM directly
           auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
-          elem_t value = gemmini_state.spad.at(base_row_addr + i).at(j);
+          elem_t value = gemmini_state.spad.at(spad_row).at(spad_col);
 
 #ifdef ELEM_T_IS_FLOAT
           write_to_dram<elem_t_bits>(dram_byte_addr, elem_t_to_elem_t_bits(value));
