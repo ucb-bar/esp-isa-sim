@@ -34,7 +34,7 @@ static unsigned field_width(unsigned n)
 debug_module_t::debug_module_t(sim_t *sim, const debug_module_config_t &config) :
   nprocs(sim->nprocs()),
   config(config),
-  program_buffer_bytes(4 + 4*config.progbufsize),
+  program_buffer_bytes((config.support_impebreak ? 4 : 0) + 4*config.progbufsize),
   debug_progbuf_start(debug_data_start - program_buffer_bytes),
   debug_abstract_start(debug_progbuf_start - debug_abstract_size*4),
   custom_base(0),
@@ -56,11 +56,14 @@ debug_module_t::debug_module_t(sim_t *sim, const debug_module_config_t &config) 
 
   memset(debug_rom_flags, 0, sizeof(debug_rom_flags));
   memset(program_buffer, 0, program_buffer_bytes);
-  program_buffer[4*config.progbufsize] = ebreak();
-  program_buffer[4*config.progbufsize+1] = ebreak() >> 8;
-  program_buffer[4*config.progbufsize+2] = ebreak() >> 16;
-  program_buffer[4*config.progbufsize+3] = ebreak() >> 24;
   memset(dmdata, 0, sizeof(dmdata));
+
+  if (config.support_impebreak) {
+    program_buffer[4*config.progbufsize] = ebreak();
+    program_buffer[4*config.progbufsize+1] = ebreak() >> 8;
+    program_buffer[4*config.progbufsize+2] = ebreak() >> 16;
+    program_buffer[4*config.progbufsize+3] = ebreak() >> 24;
+  }
 
   write32(debug_rom_whereto, 0,
           jal(ZERO, debug_abstract_start - DEBUG_ROM_WHERETO));
@@ -77,16 +80,17 @@ debug_module_t::~debug_module_t()
 
 void debug_module_t::reset()
 {
+  assert(sim->nprocs() > 0);
   for (unsigned i = 0; i < sim->nprocs(); i++) {
     processor_t *proc = sim->get_core(i);
     if (proc)
-      proc->halt_request = false;
+      proc->halt_request = proc->HR_NONE;
   }
 
   dmcontrol = {0};
 
   dmstatus = {0};
-  dmstatus.impebreak = true;
+  dmstatus.impebreak = config.support_impebreak;
   dmstatus.authenticated = !config.require_authentication;
   dmstatus.version = 2;
 
@@ -203,7 +207,7 @@ bool debug_module_t::store(reg_t addr, size_t len, const uint8_t* bytes)
           if (!hart_state[i].halted &&
               hart_state[i].haltgroup == hart_state[id].haltgroup) {
             processor_t *proc = sim->get_core(i);
-            proc->halt_request = true;
+            proc->halt_request = proc->HR_GROUP;
             // TODO: What if the debugger comes and writes dmcontrol before the
             // halt occurs?
           }
@@ -589,10 +593,10 @@ bool debug_module_t::perform_abstract_command()
 
       if (is_fpu_reg(regno)) {
         // Save S0
-        write32(debug_abstract, i++, csrw(S0, CSR_DSCRATCH));
+        write32(debug_abstract, i++, csrw(S0, CSR_DSCRATCH0));
         // Save mstatus
         write32(debug_abstract, i++, csrr(S0, CSR_MSTATUS));
-        write32(debug_abstract, i++, csrw(S0, CSR_DSCRATCH + 1));
+        write32(debug_abstract, i++, csrw(S0, CSR_DSCRATCH1));
         // Set mstatus.fs
         assert((MSTATUS_FS & 0xfff) == 0);
         write32(debug_abstract, i++, lui(S0, MSTATUS_FS >> 12));
@@ -601,7 +605,7 @@ bool debug_module_t::perform_abstract_command()
 
       if (regno < 0x1000 && config.support_abstract_csr_access) {
         if (!is_fpu_reg(regno)) {
-          write32(debug_abstract, i++, csrw(S0, CSR_DSCRATCH));
+          write32(debug_abstract, i++, csrw(S0, CSR_DSCRATCH0));
         }
 
         if (write) {
@@ -633,7 +637,7 @@ bool debug_module_t::perform_abstract_command()
           }
         }
         if (!is_fpu_reg(regno)) {
-          write32(debug_abstract, i++, csrr(S0, CSR_DSCRATCH));
+          write32(debug_abstract, i++, csrr(S0, CSR_DSCRATCH0));
         }
 
       } else if (regno >= 0x1000 && regno < 0x1020) {
@@ -655,6 +659,17 @@ bool debug_module_t::perform_abstract_command()
           default:
             abstractcs.cmderr = CMDERR_NOTSUP;
             return true;
+        }
+
+        if (regno == 0x1000 + S0 && write) {
+          /*
+           * The exception handler starts out be restoring dscratch to s0,
+           * which was saved before executing the abstract memory region. Since
+           * we just wrote s0, also make sure to write that same value to
+           * dscratch in case an exception occurs in a program buffer that
+           * might be executed later.
+           */
+          write32(debug_abstract, i++, csrw(S0, CSR_DSCRATCH0));
         }
 
       } else if (regno >= 0x1020 && regno < 0x1040) {
@@ -708,10 +723,10 @@ bool debug_module_t::perform_abstract_command()
 
       if (is_fpu_reg(regno)) {
         // restore mstatus
-        write32(debug_abstract, i++, csrr(S0, CSR_DSCRATCH + 1));
+        write32(debug_abstract, i++, csrr(S0, CSR_DSCRATCH1));
         write32(debug_abstract, i++, csrw(S0, CSR_MSTATUS));
         // restore s0
-        write32(debug_abstract, i++, csrr(S0, CSR_DSCRATCH));
+        write32(debug_abstract, i++, csrr(S0, CSR_DSCRATCH0));
       }
     }
 
@@ -796,7 +811,7 @@ bool debug_module_t::dmi_write(unsigned address, uint32_t value)
               }
               processor_t *proc = processor(i);
               if (proc) {
-                proc->halt_request = dmcontrol.haltreq;
+                proc->halt_request = dmcontrol.haltreq ? proc->HR_REGULAR : proc->HR_NONE;
                 if (dmcontrol.haltreq) {
                   D(fprintf(stderr, "halt hart %d\n", i));
                 }

@@ -1,14 +1,13 @@
 // vmpopc rd, vs2, vm
 require(P.VU.vsew >= e8 && P.VU.vsew <= e64);
-require_vector;
+require_vector(true);
 reg_t vl = P.VU.vl;
 reg_t sew = P.VU.vsew;
 reg_t rd_num = insn.rd();
 reg_t rs1_num = insn.rs1();
 reg_t rs2_num = insn.rs2();
-require((rd_num & (P.VU.vlmul - 1)) == 0);
-if (insn.v_vm() == 0 && P.VU.vlmul >= 2) \
-  require(insn.rd() != 0);
+require_align(rd_num, P.VU.vflmul);
+require_vm;
 
 for (reg_t i = P.VU.vstart ; i < P.VU.vl; ++i) {
   VI_LOOP_ELEMENT_SKIP();

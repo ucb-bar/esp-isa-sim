@@ -6,6 +6,7 @@
 #include <string.h>
 #include <assert.h>
 #include <pthread.h>
+#include <stdexcept>
 
 #define RV_X(x, s, n) \
   (((x) >> (s)) & ((1 << (n)) - 1))
@@ -433,11 +434,11 @@ uint64_t dtm_t::modify_csr(unsigned which, uint64_t data, uint32_t type)
   // need to run more commands to save and restore
   // S0.
   uint32_t prog[] = {
-    CSRRx(WRITE, S0, CSR_DSCRATCH, S0),
+    CSRRx(WRITE, S0, CSR_DSCRATCH0, S0),
     LOAD(xlen, S0, X0, data_base),
     CSRRx(type, S0, which, S0),
     STORE(xlen, S0, X0, data_base),
-    CSRRx(WRITE, S0, CSR_DSCRATCH, S0),
+    CSRRx(WRITE, S0, CSR_DSCRATCH0, S0),
     EBREAK
   };
 

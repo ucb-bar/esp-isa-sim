@@ -45,12 +45,15 @@ static void help(int exit_code = 1)
   fprintf(stderr, "                          The extlib flag for the library must come first.\n");
   fprintf(stderr, "  --log-cache-miss      Generate a log of cache miss\n");
   fprintf(stderr, "  --extension=<name>    Specify RoCC Extension\n");
+  fprintf(stderr, "                          This flag can be used multiple times.\n");
   fprintf(stderr, "  --extlib=<name>       Shared library to load\n");
   fprintf(stderr, "                        This flag can be used multiple times.\n");
   fprintf(stderr, "  --rbb-port=<port>     Listen on <port> for remote bitbang connection\n");
   fprintf(stderr, "  --dump-dts            Print device tree string and exit\n");
   fprintf(stderr, "  --disable-dtb         Don't write the device tree blob into memory\n");
+  fprintf(stderr, "  --kernel=<path>       Load kernel flat image into memory\n");
   fprintf(stderr, "  --initrd=<path>       Load kernel initrd into memory\n");
+  fprintf(stderr, "  --bootargs=<args>     Provide custom bootargs for kernel [default: console=hvc0 earlycon=sbi]\n");
   fprintf(stderr, "  --real-time-clint     Increment clint time at real-time rate\n");
   fprintf(stderr, "  --dm-progsize=<words> Progsize for the debug module [default 2]\n");
   fprintf(stderr, "  --dm-sba=<bits>       Debug bus master supports up to "
@@ -63,6 +66,7 @@ static void help(int exit_code = 1)
   fprintf(stderr, "  --dm-no-hasel         Debug module supports hasel\n");
   fprintf(stderr, "  --dm-no-abstract-csr  Debug module won't support abstract to authenticate\n");
   fprintf(stderr, "  --dm-no-halt-groups   Debug module won't support halt groups\n");
+  fprintf(stderr, "  --dm-no-impebreak     Debug module won't support implicit ebreak in program buffer\n");
 
   exit(exit_code);
 }
@@ -86,11 +90,52 @@ static std::ifstream::pos_type get_file_size(const char *filename)
 }
 
 static void read_file_bytes(const char *filename,size_t fileoff,
-                            char *read_buf, size_t read_sz)
+                            mem_t* mem, size_t memoff, size_t read_sz)
 {
   std::ifstream in(filename, std::ios::in | std::ios::binary);
   in.seekg(fileoff, std::ios::beg);
-  in.read(read_buf, read_sz);
+
+  std::vector<char> read_buf(read_sz, 0);
+  in.read(&read_buf[0], read_sz);
+  mem->store(memoff, read_sz, (uint8_t*)&read_buf[0]);
+}
+
+bool sort_mem_region(const std::pair<reg_t, mem_t*> &a,
+                       const std::pair<reg_t, mem_t*> &b)
+{
+  if (a.first == b.first)
+    return (a.second->size() < b.second->size());
+  else
+    return (a.first < b.first);
+}
+
+void merge_overlapping_memory_regions(std::vector<std::pair<reg_t, mem_t*>>& mems)
+{
+  // check the user specified memory regions and merge the overlapping or
+  // eliminate the containing parts
+  std::sort(mems.begin(), mems.end(), sort_mem_region);
+  reg_t start_page = 0, end_page = 0;
+  std::vector<std::pair<reg_t, mem_t*>>::reverse_iterator it = mems.rbegin();
+  std::vector<std::pair<reg_t, mem_t*>>::reverse_iterator _it = mems.rbegin();
+  for(; it != mems.rend(); ++it) {
+    reg_t _start_page = it->first/PGSIZE;
+    reg_t _end_page = _start_page + it->second->size()/PGSIZE;
+    if (_start_page >= start_page && _end_page <= end_page) {
+      // contains
+      mems.erase(std::next(it).base());
+    }else if ( _start_page < start_page && _end_page > start_page) {
+      // overlapping
+      _it->first = _start_page;
+      if (_end_page > end_page)
+        end_page = _end_page;
+      mems.erase(std::next(it).base());
+    }else {
+      _it = it;
+      start_page = _start_page;
+      end_page = _end_page;
+      assert(start_page < end_page);
+    }
+  }
 }
 
 static std::vector<std::pair<reg_t, mem_t*>> make_mems(const char* arg)
@@ -112,8 +157,23 @@ static std::vector<std::pair<reg_t, mem_t*>> make_mems(const char* arg)
     if (!*p || *p != ':')
       help();
     auto size = strtoull(p + 1, &p, 0);
-    if ((size | base) % PGSIZE != 0)
+
+    // page-align base and size
+    auto base0 = base, size0 = size;
+    size += base0 % PGSIZE;
+    base -= base0 % PGSIZE;
+    if (size % PGSIZE != 0)
+      size += PGSIZE - size % PGSIZE;
+
+    if (base + size < base)
       help();
+
+    if (size != size0) {
+      fprintf(stderr, "Warning: the memory at  [0x%llX, 0x%llX] has been realigned\n"
+                      "to the %ld KiB page size: [0x%llX, 0x%llX]\n",
+              base0, base0 + size0 - 1, long(PGSIZE / 1024), base, base + size - 1);
+    }
+
     res.push_back(std::make_pair(reg_t(base), new mem_t(size)));
     if (!*p)
       break;
@@ -121,6 +181,25 @@ static std::vector<std::pair<reg_t, mem_t*>> make_mems(const char* arg)
       help();
     arg = p + 1;
   }
+
+  merge_overlapping_memory_regions(res);
+  return res;
+}
+
+static unsigned long atoul_safe(const char* s)
+{
+  char* e;
+  auto res = strtoul(s, &e, 10);
+  if (*e)
+    help();
+  return res;
+}
+
+static unsigned long atoul_nonzero_safe(const char* s)
+{
+  auto res = atoul_safe(s);
+  if (!res)
+    help();
   return res;
 }
 
@@ -134,8 +213,11 @@ int main(int argc, char** argv)
   bool dtb_enabled = true;
   bool real_time_clint = false;
   size_t nprocs = 1;
+  const char* kernel = NULL;
+  reg_t kernel_offset, kernel_size;
   size_t initrd_size;
   reg_t initrd_start = 0, initrd_end = 0;
+  const char* bootargs = NULL;
   reg_t start_pc = reg_t(-1);
   std::vector<std::pair<reg_t, mem_t*>> mems;
   std::vector<std::pair<reg_t, abstract_device_t*>> plugin_devices;
@@ -145,11 +227,12 @@ int main(int argc, char** argv)
   bool log_cache = false;
   bool log_commits = false;
   const char *log_path = nullptr;
-  std::function<extension_t*()> extension;
+  std::vector<std::function<extension_t*()>> extensions;
   const char* initrd = NULL;
   const char* isa = DEFAULT_ISA;
   const char* priv = DEFAULT_PRIV;
   const char* varch = DEFAULT_VARCH;
+  const char* dtb_file = NULL;
   uint16_t rbb_port = 0;
   bool use_rbb = false;
   unsigned dmi_rti = 0;
@@ -160,7 +243,8 @@ int main(int argc, char** argv)
     .abstract_rti = 0,
     .support_hasel = true,
     .support_abstract_csr_access = true,
-    .support_haltgroups = true
+    .support_haltgroups = true,
+    .support_impebreak = true
   };
   std::vector<int> hartids;
 
@@ -225,11 +309,11 @@ int main(int argc, char** argv)
   parser.option('d', 0, 0, [&](const char* s){debug = true;});
   parser.option('g', 0, 0, [&](const char* s){histogram = true;});
   parser.option('l', 0, 0, [&](const char* s){log = true;});
-  parser.option('p', 0, 1, [&](const char* s){nprocs = atoi(s);});
+  parser.option('p', 0, 1, [&](const char* s){nprocs = atoul_nonzero_safe(s);});
   parser.option('m', 0, 1, [&](const char* s){mems = make_mems(s);});
   // I wanted to use --halted, but for some reason that doesn't work.
   parser.option('H', 0, 0, [&](const char* s){halted = true;});
-  parser.option(0, "rbb-port", 1, [&](const char* s){use_rbb = true; rbb_port = atoi(s);});
+  parser.option(0, "rbb-port", 1, [&](const char* s){use_rbb = true; rbb_port = atoul_safe(s);});
   parser.option(0, "pc", 1, [&](const char* s){start_pc = strtoull(s, 0, 0);});
   parser.option(0, "hartids", 1, hartids_parser);
   parser.option(0, "ic", 1, [&](const char* s){ic.reset(new icache_sim_t(s));});
@@ -240,10 +324,13 @@ int main(int argc, char** argv)
   parser.option(0, "priv", 1, [&](const char* s){priv = s;});
   parser.option(0, "varch", 1, [&](const char* s){varch = s;});
   parser.option(0, "device", 1, device_parser);
-  parser.option(0, "extension", 1, [&](const char* s){extension = find_extension(s);});
+  parser.option(0, "extension", 1, [&](const char* s){extensions.push_back(find_extension(s));});
   parser.option(0, "dump-dts", 0, [&](const char *s){dump_dts = true;});
   parser.option(0, "disable-dtb", 0, [&](const char *s){dtb_enabled = false;});
+  parser.option(0, "dtb", 1, [&](const char *s){dtb_file = s;});
+  parser.option(0, "kernel", 1, [&](const char* s){kernel = s;});
   parser.option(0, "initrd", 1, [&](const char* s){initrd = s;});
+  parser.option(0, "bootargs", 1, [&](const char* s){bootargs = s;});
   parser.option(0, "real-time-clint", 0, [&](const char *s){real_time_clint = true;});
   parser.option(0, "extlib", 1, [&](const char *s){
     void *lib = dlopen(s, RTLD_NOW | RTLD_GLOBAL);
@@ -253,15 +340,17 @@ int main(int argc, char** argv)
     }
   });
   parser.option(0, "dm-progsize", 1,
-      [&](const char* s){dm_config.progbufsize = atoi(s);});
+      [&](const char* s){dm_config.progbufsize = atoul_safe(s);});
+  parser.option(0, "dm-no-impebreak", 0,
+      [&](const char* s){dm_config.support_impebreak = false;});
   parser.option(0, "dm-sba", 1,
-      [&](const char* s){dm_config.max_bus_master_bits = atoi(s);});
+      [&](const char* s){dm_config.max_bus_master_bits = atoul_safe(s);});
   parser.option(0, "dm-auth", 0,
       [&](const char* s){dm_config.require_authentication = true;});
   parser.option(0, "dmi-rti", 1,
-      [&](const char* s){dmi_rti = atoi(s);});
+      [&](const char* s){dmi_rti = atoul_safe(s);});
   parser.option(0, "dm-abstract-rti", 1,
-      [&](const char* s){dm_config.abstract_rti = atoi(s);});
+      [&](const char* s){dm_config.abstract_rti = atoul_safe(s);});
   parser.option(0, "dm-no-hasel", 0,
       [&](const char* s){dm_config.support_hasel = false;});
   parser.option(0, "dm-no-abstract-csr", 0,
@@ -281,21 +370,35 @@ int main(int argc, char** argv)
   if (!*argv1)
     help();
 
+  if (kernel && check_file_exists(kernel)) {
+    kernel_size = get_file_size(kernel);
+    if (isa[2] == '6' && isa[3] == '4')
+      kernel_offset = 0x200000;
+    else
+      kernel_offset = 0x400000;
+    for (auto& m : mems) {
+      if (kernel_size && (kernel_offset + kernel_size) < m.second->size()) {
+         read_file_bytes(kernel, 0, m.second, kernel_offset, kernel_size);
+         break;
+      }
+    }
+  }
+
   if (initrd && check_file_exists(initrd)) {
     initrd_size = get_file_size(initrd);
     for (auto& m : mems) {
       if (initrd_size && (initrd_size + 0x1000) < m.second->size()) {
          initrd_end = m.first + m.second->size() - 0x1000;
          initrd_start = initrd_end - initrd_size;
-         read_file_bytes(initrd, 0, m.second->contents() + (initrd_start - m.first), initrd_size);
+         read_file_bytes(initrd, 0, m.second, initrd_start - m.first, initrd_size);
          break;
       }
     }
   }
 
   sim_t s(isa, priv, varch, nprocs, halted, real_time_clint,
-      initrd_start, initrd_end, start_pc, mems, plugin_devices, htif_args,
-      std::move(hartids), dm_config, log_path);
+      initrd_start, initrd_end, bootargs, start_pc, mems, plugin_devices, htif_args,
+      std::move(hartids), dm_config, log_path, dtb_enabled, dtb_file);
   std::unique_ptr<remote_bitbang_t> remote_bitbang((remote_bitbang_t *) NULL);
   std::unique_ptr<jtag_dtm_t> jtag_dtm(
       new jtag_dtm_t(&s.debug_module, dmi_rti));
@@ -303,7 +406,6 @@ int main(int argc, char** argv)
     remote_bitbang.reset(new remote_bitbang_t(rbb_port, &(*jtag_dtm)));
     s.set_remote_bitbang(&(*remote_bitbang));
   }
-  s.set_dtb_enabled(dtb_enabled);
 
   if (dump_dts) {
     printf("%s", s.get_dts());
@@ -318,10 +420,8 @@ int main(int argc, char** argv)
   {
     if (ic) s.get_core(i)->get_mmu()->register_memtracer(&*ic);
     if (dc) s.get_core(i)->get_mmu()->register_memtracer(&*dc);
-    if (extension) {
-      s.get_core(i)->register_extension(extension());
-      s.get_core(i)->reset();
-    }
+    for (auto e : extensions)
+      s.get_core(i)->register_extension(e());
   }
 
   s.set_debug(debug);

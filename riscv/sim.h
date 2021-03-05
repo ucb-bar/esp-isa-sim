@@ -25,11 +25,12 @@ class sim_t : public htif_t, public simif_t
 public:
   sim_t(const char* isa, const char* priv, const char* varch, size_t _nprocs,
         bool halted, bool real_time_clint,
-        reg_t initrd_start, reg_t initrd_end,
+        reg_t initrd_start, reg_t initrd_end, const char* bootargs,
         reg_t start_pc, std::vector<std::pair<reg_t, mem_t*>> mems,
         std::vector<std::pair<reg_t, abstract_device_t*>> plugin_devices,
         const std::vector<std::string>& args, const std::vector<int> hartids,
-        const debug_module_config_t &dm_config, const char *log_path);
+        const debug_module_config_t &dm_config, const char *log_path,
+        bool dtb_enabled, const char *dtb_file);
   ~sim_t();
 
   // run the simulation to completion
@@ -46,9 +47,6 @@ public:
   void configure_log(bool enable_log, bool enable_commitlog);
 
   void set_procs_debug(bool value);
-  void set_dtb_enabled(bool value) {
-    this->dtb_enabled = value;
-  }
   void set_remote_bitbang(remote_bitbang_t* remote_bitbang) {
     this->remote_bitbang = remote_bitbang;
   }
@@ -66,8 +64,12 @@ private:
   std::vector<processor_t*> procs;
   reg_t initrd_start;
   reg_t initrd_end;
+  const char* bootargs;
   reg_t start_pc;
   std::string dts;
+  std::string dtb;
+  std::string dtb_file;
+  bool dtb_enabled;
   std::unique_ptr<rom_device_t> boot_rom;
   std::unique_ptr<clint_t> clint;
   bus_t bus;
@@ -83,7 +85,6 @@ private:
   bool debug;
   bool histogram_enabled; // provide a histogram of PCs
   bool log;
-  bool dtb_enabled;
   remote_bitbang_t* remote_bitbang;
 
   // memory-mapped I/O routines
@@ -91,6 +92,9 @@ private:
   bool mmio_load(reg_t addr, size_t len, uint8_t* bytes);
   bool mmio_store(reg_t addr, size_t len, const uint8_t* bytes);
   void make_dtb();
+  void set_rom();
+
+  const char* get_symbol(uint64_t addr);
 
   // presents a prompt for introspection into the simulation
   void interactive();
@@ -104,6 +108,7 @@ private:
   void interactive_vreg(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_reg(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_freg(const std::string& cmd, const std::vector<std::string>& args);
+  void interactive_fregh(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_fregs(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_fregd(const std::string& cmd, const std::vector<std::string>& args);
   void interactive_pc(const std::string& cmd, const std::vector<std::string>& args);
@@ -133,6 +138,8 @@ private:
   void write_chunk(addr_t taddr, size_t len, const void* src);
   size_t chunk_align() { return 8; }
   size_t chunk_max_size() { return 8; }
+  void set_target_endianness(memif_endianness_t endianness);
+  memif_endianness_t get_target_endianness() const;
 
 public:
   // Initialize this after procs, because in debug_module_t::reset() we
