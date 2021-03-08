@@ -21,6 +21,9 @@ static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the
 #define dprintf(...)
 #endif
 
+#define MAKECUSTOMFN(opcode) custom ## opcode
+#define CUSTOMFN(opcode) MAKECUSTOMFN(opcode)
+
 struct gemmini_state_t
 {
   enum Dataflow {OS, WS};
@@ -37,8 +40,9 @@ struct gemmini_state_t
   reg_t sys_shift, relu6_shift;
   reg_t load_strides[LOAD_STATES];
   reg_t store_stride;
+  uint16_t load_block_strides[LOAD_STATES];
   bool load_shrunks[LOAD_STATES];
-#ifdef HAS_MVIN_SCALE
+#if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
   scale_t load_scales[LOAD_STATES];
 #endif
   acc_scale_t acc_shift;
@@ -58,6 +62,15 @@ struct gemmini_state_t
   uint16_t loop_ws_pad_I, loop_ws_pad_J, loop_ws_pad_K;
   uint64_t loop_ws_A, loop_ws_B, loop_ws_D, loop_ws_C;
   uint64_t loop_ws_A_stride, loop_ws_B_stride, loop_ws_D_stride, loop_ws_C_stride;
+  uint16_t loop_conv_ws_batch_size, loop_conv_ws_in_dim, loop_conv_ws_in_channels, loop_conv_ws_out_channels;
+  uint16_t loop_conv_ws_out_dim, loop_conv_ws_pool_out_dim, loop_conv_ws_stride, loop_conv_ws_padding;
+  uint16_t loop_conv_ws_kernel_dim, loop_conv_ws_pool_size, loop_conv_ws_pool_stride, loop_conv_ws_pool_padding;
+  uint16_t loop_conv_ws_batches, loop_conv_ws_porows, loop_conv_ws_pocols, loop_conv_ws_pochs;
+  uint16_t loop_conv_ws_krows, loop_conv_ws_kcols, loop_conv_ws_kchs, loop_conv_ws_lpad;
+  uint16_t loop_conv_ws_rpad, loop_conv_ws_upad, loop_conv_ws_dpad, loop_conv_ws_plpad;
+  uint16_t loop_conv_ws_prad, loop_conv_ws_pupad, loop_conv_ws_pdpad, loop_conv_ws_orows;
+  uint16_t loop_conv_ws_ocols;
+  uint64_t loop_conv_ws_input, loop_conv_ws_weights, loop_conv_ws_output, loop_conv_ws_bias;
 
   bool enable;
 
@@ -76,7 +89,9 @@ class gemmini_t : public rocc_t
 public:
   gemmini_t() : cause(0), aux(0), debug(false) {}
   const char* name() { return "gemmini"; }
-  reg_t custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2);
+
+
+  reg_t CUSTOMFN(XCUSTOM_ACC)( rocc_insn_t insn, reg_t xs1, reg_t xs2);
   void reset();
 
   void mvin(reg_t dram_addr, reg_t sp_addr, int state_id);
@@ -92,6 +107,14 @@ public:
   void loop_ws_config_addrs_DC(reg_t rs1, reg_t rs2);
   void loop_ws_config_strides_AB(reg_t rs1, reg_t rs2);
   void loop_ws_config_strides_DC(reg_t rs1, reg_t rs2);
+
+  void loop_conv_ws(reg_t rs1, reg_t rs2);
+  void loop_conv_ws_config_1(reg_t rs1, reg_t rs2);
+  void loop_conv_ws_config_2(reg_t rs1, reg_t rs2);
+  void loop_conv_ws_config_3(reg_t rs1, reg_t rs2);
+  void loop_conv_ws_config_4(reg_t rs1, reg_t rs2);
+  void loop_conv_ws_config_5(reg_t rs1, reg_t rs2);
+  void loop_conv_ws_config_6(reg_t rs1, reg_t rs2);
 
 private:
   gemmini_state_t gemmini_state;
@@ -113,6 +136,13 @@ private:
   const unsigned loop_ws_config_addrs_DC_funct = 11;
   const unsigned loop_ws_config_strides_AB_funct = 12;
   const unsigned loop_ws_config_strides_DC_funct = 13;
+  const unsigned loop_conv_ws_funct = 15;
+  const unsigned loop_conv_ws_config_1_funct = 16;
+  const unsigned loop_conv_ws_config_2_funct = 17;
+  const unsigned loop_conv_ws_config_3_funct = 18;
+  const unsigned loop_conv_ws_config_4_funct = 19;
+  const unsigned loop_conv_ws_config_5_funct = 20;
+  const unsigned loop_conv_ws_config_6_funct = 21;
 
   //==========================================================================
   // gemmini-cisc opcodes
