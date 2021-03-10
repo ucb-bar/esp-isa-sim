@@ -21,6 +21,9 @@ static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the
 #define dprintf(...)
 #endif
 
+#define MAKECUSTOMFN(opcode) custom ## opcode
+#define CUSTOMFN(opcode) MAKECUSTOMFN(opcode)
+
 struct gemmini_state_t
 {
   enum Dataflow {OS, WS};
@@ -86,7 +89,9 @@ class gemmini_t : public rocc_t
 public:
   gemmini_t() : cause(0), aux(0), debug(false) {}
   const char* name() { return "gemmini"; }
-  reg_t custom3(rocc_insn_t insn, reg_t xs1, reg_t xs2);
+
+
+  reg_t CUSTOMFN(XCUSTOM_ACC)( rocc_insn_t insn, reg_t xs1, reg_t xs2);
   void reset();
 
   void mvin(reg_t dram_addr, reg_t sp_addr, int state_id);
