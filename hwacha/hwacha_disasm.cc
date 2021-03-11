@@ -278,7 +278,7 @@ std::vector<disasm_insn_t*> hwacha_t::get_disasms()
     insns.push_back(new disasm_insn_t(name, match_##code, mask_##code | (extra), __VA_ARGS__));
 
   DISASM_INSN("vsetcfg", vsetcfg, 0, {&npregs, &nxregs});
-  DISASM_INSN("vsetvl", vsetvl, 0, {&xrd, &xrs1});
+  DISASM_INSN("hvsetvl", hvsetvl, 0, {&xrd, &xrs1});
   DISASM_INSN("vgetcfg", vgetcfg, 0, {&xrd});
   DISASM_INSN("vgetvl", vgetvl, 0, {&xrd});
 
