@@ -1061,9 +1061,6 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
       2,
       out_channels * sizeof(elem_t));
 
-
-      (pool_out_dim << 24) | (plpad << 10) | (pupad << 8) | (pool_size << 6) | (pool_stride << 4)
-
     for (int b = 0; b < batches; b++) {
       for (int poch = 0; poch < pochs; poch += DIM) {
         const int channels = poch + DIM >= pochs ? pochs - poch : DIM;
