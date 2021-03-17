@@ -1030,6 +1030,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
         }
       }
 
+  // Mvout results
   if (output != 0 && no_pool) {
     for (uint16_t b = 0; b < batches; b++)
       for (uint16_t orow = 0; orow < orows; orow++)
@@ -1045,6 +1046,37 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
                 ((uint64_t)I << 48) | ((uint64_t)J << 32) | C_sp_addr);
           }
         }
+  } else if (output != 0 && !no_pool) {
+    // gemmini_extended_config_st(out_channels * sizeof(elem_t), pool_stride, pool_size, pool_out_dim, porows, pocols, orows, ocols, pupad, plpad);
+    config(
+      ((uint64_t)ocols << 56) |
+      ((uint64_t)orows << 48) |
+      ((uint64_t)pocols << 40) |
+      ((uint64_t)porows << 32) |
+      ((uint64_t)pool_out_dim << 24) |
+      ((uint64_t)plpad << 10) |
+      ((uint64_t)pupad << 8) |
+      ((uint64_t)pool_size << 6) |
+      ((uint64_t)pool_stride << 4) |
+      2,
+      out_channels * sizeof(elem_t));
+
+
+      (pool_out_dim << 24) | (plpad << 10) | (pupad << 8) | (pool_size << 6) | (pool_stride << 4)
+
+    for (int b = 0; b < batches; b++) {
+      for (int poch = 0; poch < pochs; poch += DIM) {
+        const int channels = poch + DIM >= pochs ? pochs - poch : DIM;
+
+        const uint32_t C_sp_addr = C_sp_addr_start + (poch / DIM) * batches * orows * ocols + b * orows * ocols;
+
+        mvout(output + ((b * pool_out_dim * pool_out_dim)*out_channels + poch) * sizeof(elem_t),
+          ((uint64_t)channels << 32) | C_sp_addr);
+      }
+    }
+
+    // gemmini_config_st(out_channels * sizeof(elem_t));
+    config(2, out_channels * sizeof(elem_t));
   }
 }
 
