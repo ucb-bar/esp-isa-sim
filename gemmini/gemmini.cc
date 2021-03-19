@@ -976,24 +976,18 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   }
 
   // Compute
-  for (uint16_t b = 0; b < batches; b++)
-    for (uint16_t orow = 0; orow < orows; orow++)
-      for (uint16_t ocol = 0; ocol < ocols; ocol += DIM) {
-        const uint16_t I = ocols - ocol > DIM ? DIM : ocols - ocol;
+  for (uint16_t och = 0; och < ochs; och += DIM) {
+    for (uint16_t krow = 0; krow < krows; krow++) {
+      for (uint16_t kcol = 0; kcol < kcols; kcol++) {
+        for (uint16_t kch = 0; kch < kchs; kch += DIM) {
+          for (uint16_t b = 0; b < batches; b++)
+            for (uint16_t orow = 0; orow < orows; orow++)
+              for (uint16_t ocol = 0; ocol < ocols; ocol += DIM) {
+                const uint16_t irow = orow * stride + krow;
+                const uint16_t icol = ocol * stride + kcol;
 
-        for (uint16_t och = 0; och < ochs; och += DIM) {
-          const uint16_t J = ochs - och > DIM ? DIM : ochs - och;
+                const uint32_t C_sp_addr = C_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
 
-          const uint32_t C_sp_addr = C_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
-
-          for (uint16_t krow = 0; krow < krows; krow++) {
-            const uint16_t irow = orow * stride + krow;
-
-            // for (uint16_t kcol = 0; kcol < kcols; kcol++) {
-            for (uint16_t kcol = 0; kcol < kcols; kcol++) {
-              const uint16_t icol = ocol * stride + kcol;
-
-              for (uint16_t kch = 0; kch < kchs; kch += DIM) {
                 // Over here, construct a new matrix
                 //
                 // Let us assume that we only ever operate on
@@ -1005,10 +999,16 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
                 //   - J = och
                 //   - K = kch
 
+                const uint16_t I = ocols - ocol > DIM ? DIM : ocols - ocol;
+                const uint16_t J = ochs - och > DIM ? DIM : ochs - och;
                 const uint16_t K = (kchs - kch > DIM ? DIM : kchs - kch);
 
                 const uint32_t A_sp_addr = A_sp_addr_start + (kch / DIM) * batches * irows * icols + b * irows * icols + irow * icols + icol;
-                const uint32_t B_sp_addr = B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow * kcols * kchs + kcol * kchs + kch;
+
+                const bool new_weights = b == 0 && orow == 0 && ocol == 0;
+                const uint32_t B_sp_addr = new_weights ?
+                  (B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow * kcols * kchs + kcol * kchs + kch)
+                  : GARBAGE_ADDR;
 
                 // perform matmul
                 const uint32_t out_sp_addr =
@@ -1016,14 +1016,21 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
                   C_sp_addr & ~((uint32_t)(1 << (ADDR_LEN - 2))) :
                   C_sp_addr;
 
-                // gemmini_extended_preload(B_sp_addr, out_sp_addr,
-                //     J, K, J, I);
-                // gemmini_extended_compute_preloaded(A_sp_addr, GARBAGE_ADDR, K, I, J, I);
+                /*
+                gemmini_extended_preload(B_sp_addr, out_sp_addr,
+                        J, K, J, I);
+
+                if (new_weights) {
+                  gemmini_extended_compute_preloaded(A_sp_addr, GARBAGE_ADDR, K, I, J, I);
+                } else {
+                  gemmini_extended_compute_accumulated(A_sp_addr, GARBAGE_ADDR, K, I, J, I);
+                }
+                */
 
                 preload(((uint64_t)K << 48) | ((uint64_t)J << 32) | B_sp_addr,
                     ((uint64_t)I << 48) | ((uint64_t)J << 32) | out_sp_addr);
                 compute(((uint64_t)I << 48) | ((uint64_t)K << 32) | A_sp_addr,
-                    ((uint64_t)I << 48) | ((uint64_t)J << 32) | GARBAGE_ADDR, 1);
+                    ((uint64_t)I << 48) | ((uint64_t)J << 32) | GARBAGE_ADDR, new_weights);
               }
             }
           }
