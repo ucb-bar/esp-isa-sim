@@ -136,6 +136,7 @@ private:
   const unsigned loop_ws_config_addrs_DC_funct = 11;
   const unsigned loop_ws_config_strides_AB_funct = 12;
   const unsigned loop_ws_config_strides_DC_funct = 13;
+
   const unsigned loop_conv_ws_funct = 15;
   const unsigned loop_conv_ws_config_1_funct = 16;
   const unsigned loop_conv_ws_config_2_funct = 17;
@@ -143,6 +144,8 @@ private:
   const unsigned loop_conv_ws_config_4_funct = 19;
   const unsigned loop_conv_ws_config_5_funct = 20;
   const unsigned loop_conv_ws_config_6_funct = 21;
+
+  const unsigned fence_funct = 127;
 
   //==========================================================================
   // gemmini-cisc opcodes
