@@ -794,6 +794,7 @@ void gemmini_t::loop_ws_config_strides_DC(reg_t rs1, reg_t rs2) {
 void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool no_bias = rs1 & 1;
   const bool no_pool = rs2 & 1;
+  const bool downsample = (rs2 >> 1) & 1;
 
   const uint16_t batch_size = gemmini_state.loop_conv_ws_batch_size;
   const uint16_t in_dim = gemmini_state.loop_conv_ws_in_dim;
@@ -859,6 +860,8 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   }
 
   const uint32_t GARBAGE_ADDR = ~0;
+
+  gemmini_state.a_stride <<= downsample;
 
   // mvin bias
   if (!no_bias && bias != 0) {
@@ -1082,6 +1085,8 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
     // gemmini_config_st(out_channels * sizeof(elem_t));
     config(2, out_channels * sizeof(elem_t));
   }
+
+  gemmini_state.a_stride >>= downsample;
 }
 
 void gemmini_t::loop_conv_ws_config_1(reg_t rs1, reg_t rs2) {
