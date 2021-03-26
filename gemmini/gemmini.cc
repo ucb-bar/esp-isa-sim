@@ -861,8 +861,6 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
   const uint32_t GARBAGE_ADDR = ~0;
 
-  gemmini_state.a_stride <<= downsample;
-
   // mvin bias
   if (!no_bias && bias != 0) {
     // TODO we probably don't need quite this many nested loops for this part
@@ -893,6 +891,9 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
         }
   }
 
+#define DS(x) ((x) >> (downsample))
+#define US(x) ((x) << (downsample))
+
   // mvin input
   {
     const int16_t max_ichs_per_mvin = ichs < MAX_BLOCK_LEN * DIM ? ichs :
@@ -900,18 +901,18 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
     // gemmini_extended4_config_ld(in_channels * sizeof(elem_t), MVIN_SCALE_IDENTITY, false, batches * irows * icols, 0);
     config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
-      ((uint64_t)(batches * irows * icols) << 16) |
+      ((uint64_t)(batches * DS(irows) * DS(icols)) << 16) |
       (0 << 3) | 1,
-      in_channels * sizeof(elem_t));
+      US(in_channels * sizeof(elem_t)));
 
     for (int16_t b = 0; b < batches; b++)
-      for (int16_t irow = -upad; irow < irows_unpadded + dpad; irow++) {
+      for (int16_t irow = -upad; irow < irows_unpadded + dpad; irow += US(1)) {
         const int16_t irow_padded = irow + upad;
 
         for (int16_t icol = -lpad; icol < icols_unpadded + rpad;) {
           // TODO There might be some unnecessary mvins here at the edge of the image
 
-          int16_t I = icols_unpadded - icol > DIM ? DIM : icols_unpadded - icol;
+          int16_t I = icols_unpadded - icol > US(DIM) ? US(DIM) : icols_unpadded - icol;
 
           if (icol < 0) {
             I = -icol > DIM ? DIM : -icol;
@@ -925,7 +926,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
             const int16_t K = ichs - ich > max_ichs_per_mvin ?
               max_ichs_per_mvin : ichs - ich;
 
-            const uint32_t A_sp_addr = A_sp_addr_start + (ich / DIM) * batches * irows * icols + b * irows * icols + irow_padded * icols + icol_padded;
+            const uint32_t A_sp_addr = A_sp_addr_start + (ich / DIM) * batches * DS(irows) * DS(icols) + b * DS(irows) * DS(icols) + DS(irow_padded) * DS(icols) + DS(icol_padded);
 
             const bool is_zeros = irow < 0 || irow >= irows_unpadded || icol < 0 || icol >= icols_unpadded;
 
@@ -936,7 +937,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
             //     A_sp_addr,
             //     K, I);
             mvin(in,
-              ((uint64_t)I << 48) | ((uint64_t)K << 32) | A_sp_addr,
+              ((uint64_t)(DS(I)) << 48) | ((uint64_t)K << 32) | A_sp_addr,
               0);
           }
 
@@ -1006,7 +1007,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
                 const uint16_t J = ochs - och > DIM ? DIM : ochs - och;
                 const uint16_t K = (kchs - kch > DIM ? DIM : kchs - kch);
 
-                const uint32_t A_sp_addr = A_sp_addr_start + (kch / DIM) * batches * irows * icols + b * irows * icols + irow * icols + icol;
+                const uint32_t A_sp_addr = A_sp_addr_start + (kch / DIM) * batches * DS(irows) * DS(icols) + b * DS(irows) * DS(icols) + DS(irow) * DS(icols) + DS(icol);
 
                 const bool new_weights = b == 0 && orow == 0 && ocol == 0;
                 const uint32_t B_sp_addr = new_weights ?
@@ -1039,6 +1040,9 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
           }
         }
       }
+
+#undef DS
+#undef US
 
   // Mvout results
   if (output != 0 && no_pool) {
@@ -1085,8 +1089,6 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
     // gemmini_config_st(out_channels * sizeof(elem_t));
     config(2, out_channels * sizeof(elem_t));
   }
-
-  gemmini_state.a_stride >>= downsample;
 }
 
 void gemmini_t::loop_conv_ws_config_1(reg_t rs1, reg_t rs2) {
