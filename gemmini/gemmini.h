@@ -45,6 +45,7 @@ struct gemmini_state_t
 #if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
   scale_t load_scales[LOAD_STATES];
 #endif
+  uint8_t pixels_per_rows[LOAD_STATES];
   acc_scale_t acc_shift;
   uint16_t a_stride;
   uint8_t pool_stride;

@@ -117,6 +117,7 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
 #if defined(HAS_MVIN_SCALE) || defined(HAS_MVIN_ACC_SCALE)
   auto const load_scale = gemmini_state.load_scales[state_id];
 #endif
+  auto const pixels_per_row = gemmini_state.pixels_per_rows[state_id];
 
   dprintf("GEMMINI: mvin - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, dram_addr, sp_addr & 0xFFFFFFFF);
 
@@ -127,74 +128,80 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
       const size_t block = col / DIM;
       const size_t spad_col = col % DIM;
 
-      if (accumulator) {
-          auto const dram_byte_addr = dram_row_addr + col *
-            (load_shrunk ? sizeof(elem_t) : sizeof(acc_t));
+      for (size_t pixel = 0; pixel < pixels_per_row; pixel++) {
 
-          acc_t value;
-          if (is_zeros) {
-            value = 0;
-          } else if (!load_shrunk) {
+        if (pixel > base_row_addr)
+          continue;
+
+        if (accumulator) {
+            auto const dram_byte_addr = dram_row_addr + col *
+              (load_shrunk ? sizeof(elem_t) : sizeof(acc_t));
+
+            acc_t value;
+            if (is_zeros) {
+              value = 0;
+            } else if (!load_shrunk) {
 #ifdef ELEM_T_IS_FLOAT
-            value = acc_t_bits_to_acc_t(read_from_dram<acc_t_bits>(dram_byte_addr));
+              value = acc_t_bits_to_acc_t(read_from_dram<acc_t_bits>(dram_byte_addr));
 #else
-            value = read_from_dram<acc_t>(dram_byte_addr);
+              value = read_from_dram<acc_t>(dram_byte_addr);
 #endif
 
 #ifdef HAS_MVIN_ACC_SCALE
-            value = mvin_scale_acc(value, load_scale);
+              value = mvin_scale_acc(value, load_scale);
 #endif
-          } else {
+            } else {
 #ifdef ELEM_T_IS_FLOAT
-            value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_byte_addr));
+              value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_byte_addr));
 #else
-            value = read_from_dram<elem_t>(dram_byte_addr);
+              value = read_from_dram<elem_t>(dram_byte_addr);
 #endif
 
 #ifdef HAS_MVIN_SCALE
-            value = mvin_scale(value, load_scale);
+              value = mvin_scale(value, load_scale);
 #endif
-          }
+            }
 
-          if (accumulate) {
-            gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col) += value;
-          } else {
-            gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col) = value;
-          }
+            if (accumulate) {
+              gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride - pixel).at(spad_col + pixel*cols) += value;
+            } else {
+              gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride - pixel).at(spad_col + pixel*cols) = value;
+            }
 
 #ifdef ELEM_T_IS_FLOAT
-          dprintf("%f ", gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col));
+            dprintf("%f ", gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col));
 #else
-          dprintf("%d ", gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col));
+            dprintf("%d ", gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col));
 #endif
-      } else {
-          auto const dram_byte_addr = dram_row_addr + col*sizeof(elem_t);
+        } else {
+            auto const dram_byte_addr = dram_row_addr + col*sizeof(elem_t);
 
-          elem_t value;
-          if (is_zeros) {
-            value = 0;
-          } else {
+            elem_t value;
+            if (is_zeros) {
+              value = 0;
+            } else {
 #ifdef ELEM_T_IS_FLOAT
-            value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_byte_addr));
+              value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_byte_addr));
 #else
-            value = read_from_dram<elem_t>(dram_byte_addr);
+              value = read_from_dram<elem_t>(dram_byte_addr);
 #endif
 
 #ifdef HAS_MVIN_SCALE
-            value = mvin_scale(value, load_scale);
+              value = mvin_scale(value, load_scale);
 #endif
-          }
+            }
 
-          gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col) = value;
+            gemmini_state.spad.at(base_row_addr + row + block*load_block_stride - pixel).at(spad_col + pixel * cols) = value;
 
 #ifdef ELEM_T_IS_FLOAT
-          dprintf("%f ", gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col));
+            dprintf("%f ", gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col));
 #else
-          dprintf("%d ", gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col));
+            dprintf("%d ", gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col));
 #endif
+        }
       }
+      dprintf("\n");
     }
-    dprintf("\n");
   }
 }
 
@@ -392,6 +399,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     gemmini_state.load_scales[state_id] = scale_t_bits_to_scale_t(rs1 >> 32);
     gemmini_state.load_shrunks[state_id] = (rs1 >> 2) & 1;
 #endif
+    gemmini_state.pixels_per_rows[state_id] = (rs1 >> 8) & 0xFF;
   } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
     dprintf("GEMMINI: config_mvout - set store stride from %lu to %lu\n", gemmini_state.store_stride, rs2);
     gemmini_state.store_stride = rs2;
@@ -840,6 +848,9 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const int16_t icols_unpadded = icols - lpad - rpad;
   const int16_t ichs = kchs;
 
+  uint8_t max_pixels_per_row = downsample || ichs > DIM ? 1 : DIM/ichs;
+  if (max_pixels_per_row > kcols) max_pixels_per_row = kcols;
+
   const int out_channels_per_bank = ochs / DIM + (ochs % DIM != 0);
   const int B_rows = out_channels_per_bank * kcols * krows * kchs;
 
@@ -871,6 +882,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
     // gemmini_extended4_config_ld(0, MVIN_SCALE_IDENTITY, false, batches * orows * ocols, 2);
     config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
       ((uint64_t)(batches * orows * ocols) << 16) |
+      (1 << 8) |
       (2 << 3) | 1,
       0);
 
@@ -899,9 +911,10 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
     const int16_t max_ichs_per_mvin = ichs < MAX_BLOCK_LEN * DIM ? ichs :
       MAX_BLOCK_LEN * DIM;
 
-    // gemmini_extended4_config_ld(in_channels * sizeof(elem_t), MVIN_SCALE_IDENTITY, false, batches * irows * icols, 0);
+    // gemmini_extended5_config_ld(in_channels * sizeof(elem_t), MVIN_SCALE_IDENTITY, false, batches * irows * icols, max_pixels_per_row, 0);
     config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
       ((uint64_t)(batches * DS(irows) * DS(icols)) << 16) |
+      ((uint64_t)(max_pixels_per_row) << 8) |
       (0 << 3) | 1,
       US(in_channels * sizeof(elem_t)));
 
@@ -954,6 +967,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
     // gemmini_extended4_config_ld(out_channels * sizeof(elem_t), MVIN_SCALE_IDENTITY, false, krows * kcols * kchs, 1);
     config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
       ((uint64_t)(krows * kcols * kchs) << 16) |
+      (1 << 8) |
       (1 << 3) | 1,
       out_channels * sizeof(elem_t));
 
@@ -982,7 +996,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   // Compute
   for (uint16_t och = 0; och < ochs; och += DIM) {
     for (uint16_t krow = 0; krow < krows; krow++) {
-      for (uint16_t kcol = 0; kcol < kcols; kcol++) {
+      for (uint16_t kcol = 0; kcol < kcols; kcol += max_pixels_per_row) {
         for (uint16_t kch = 0; kch < kchs; kch += DIM) {
           for (uint16_t b = 0; b < batches; b++)
             for (uint16_t orow = 0; orow < orows; orow++)
@@ -1003,9 +1017,12 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
                 //   - J = och
                 //   - K = kch
 
+                const uint8_t pixels = kcols - kcol > max_pixels_per_row ?
+                  max_pixels_per_row : kcols - kcol;
+
                 const uint16_t I = ocols - ocol > DIM ? DIM : ocols - ocol;
                 const uint16_t J = ochs - och > DIM ? DIM : ochs - och;
-                const uint16_t K = (kchs - kch > DIM ? DIM : kchs - kch);
+                const uint16_t K = pixels * (kchs - kch > DIM ? DIM : kchs - kch);
 
                 const uint32_t A_sp_addr = A_sp_addr_start + (kch / DIM) * batches * DS(irows) * DS(icols) + b * DS(irows) * DS(icols) + DS(irow) * DS(icols) + DS(icol);
 
