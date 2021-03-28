@@ -127,11 +127,9 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
     for (size_t col = 0; col < cols; ++col) {
       const size_t block = col / DIM;
       const size_t spad_col = col % DIM;
+      const size_t spad_row = base_row_addr + row + block*load_block_stride;
 
-      for (size_t pixel = 0; pixel < pixels_per_row; pixel++) {
-
-        if (pixel > base_row_addr)
-          continue;
+      for (size_t pixel = 0; pixel < pixels_per_row && pixel <= spad_row; pixel++) {
 
         if (accumulator) {
             auto const dram_byte_addr = dram_row_addr + col *
@@ -163,15 +161,15 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
             }
 
             if (accumulate) {
-              gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride - pixel).at(spad_col + pixel*cols) += value;
+              gemmini_state.accumulator.at(spad_row - pixel).at(spad_col + pixel*cols) += value;
             } else {
-              gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride - pixel).at(spad_col + pixel*cols) = value;
+              gemmini_state.accumulator.at(spad_row - pixel).at(spad_col + pixel*cols) = value;
             }
 
 #ifdef ELEM_T_IS_FLOAT
-            dprintf("%f ", gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col));
+            dprintf("%f ", gemmini_state.accumulator.at(spad_row).at(spad_col));
 #else
-            dprintf("%d ", gemmini_state.accumulator.at(base_row_addr + row + block*load_block_stride).at(spad_col));
+            dprintf("%d ", gemmini_state.accumulator.at(spad_row).at(spad_col));
 #endif
         } else {
             auto const dram_byte_addr = dram_row_addr + col*sizeof(elem_t);
@@ -191,17 +189,17 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
 #endif
             }
 
-            gemmini_state.spad.at(base_row_addr + row + block*load_block_stride - pixel).at(spad_col + pixel * cols) = value;
+            gemmini_state.spad.at(spad_row - pixel).at(spad_col + pixel * cols) = value;
 
 #ifdef ELEM_T_IS_FLOAT
-            dprintf("%f ", gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col));
+            dprintf("%f ", gemmini_state.spad.at(spad_col).at(spad_col));
 #else
-            dprintf("%d ", gemmini_state.spad.at(base_row_addr + row + block*load_block_stride).at(spad_col));
+            dprintf("%d ", gemmini_state.spad.at(spad_col).at(spad_col));
 #endif
         }
       }
-      dprintf("\n");
     }
+    dprintf("\n");
   }
 }
 
@@ -801,6 +799,7 @@ void gemmini_t::loop_ws_config_strides_DC(reg_t rs1, reg_t rs2) {
 
 void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool no_bias = rs1 & 1;
+  const uint8_t max_pixels_per_row = (rs1 >> 1) & 0xFF;
   const bool no_pool = rs2 & 1;
   const bool downsample = (rs2 >> 1) & 1;
 
@@ -847,9 +846,6 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const int16_t irows_unpadded = irows - upad - dpad;
   const int16_t icols_unpadded = icols - lpad - rpad;
   const int16_t ichs = kchs;
-
-  uint8_t max_pixels_per_row = downsample || ichs > DIM ? 1 : DIM/ichs;
-  if (max_pixels_per_row > kcols) max_pixels_per_row = kcols;
 
   const int out_channels_per_bank = ochs / DIM + (ochs % DIM != 0);
   const int B_rows = out_channels_per_bank * kcols * krows * kchs;
