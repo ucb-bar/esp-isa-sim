@@ -102,7 +102,7 @@ void gemmini_t::write_to_dram(reg_t addr, T data) {
 
 // Move a gemmini block from DRAM at dram_addr (byte addr) to
 // the scratchpad/accumulator at sp_addr (gemmini-row addressed)
-void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
+void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id, bool no_pixel_repeat, bool is_tail) {
   bool const accumulator = (sp_addr >> 31) & 0x1;
   bool const accumulate = (sp_addr >> 30) & 0x1;
   auto const base_row_addr = (sp_addr & 0x1FFFFFFF); // Strip accumulator addressing bits [31:29]
@@ -1161,11 +1161,15 @@ void gemmini_t::loop_conv_ws_config_6(reg_t rs1, reg_t rs2) {
 
 reg_t gemmini_t::CUSTOMFN(XCUSTOM_ACC)(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   if (insn.funct == mvin_funct) {
-    mvin(xs1, xs2, 0);
+    mvin(xs1, xs2, 0, false, false);
+  } else if (insn.funct == mvin_funct_no_pixel_repeat) {
+    mvin(xs1, xs2, 0, true, false);
+  } else if (insn.funct == mvin_funct_tail) {
+    mvin(xs1, xs2, 0, true, true);
   } else if (insn.funct == mvin2_funct) {
-    mvin(xs1, xs2, 1);
+    mvin(xs1, xs2, 1, false, false);
   } else if (insn.funct == mvin3_funct) {
-    mvin(xs1, xs2, 2);
+    mvin(xs1, xs2, 2, false, false);
   } else if (insn.funct == mvout_funct) {
     mvout(xs1, xs2);
   } else if (insn.funct == preload_funct) {

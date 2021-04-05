@@ -126,6 +126,8 @@ private:
   const unsigned mvin_funct = 2;
   const unsigned mvin2_funct = 1;
   const unsigned mvin3_funct = 14;
+  const unsigned mvin_funct_no_pixel_repeat = 22;
+  const unsigned mvin_funct_tail = 23;
   const unsigned mvout_funct = 3;
   const unsigned compute_preloaded_funct = 4;
   const unsigned compute_accumulated_funct = 5;
