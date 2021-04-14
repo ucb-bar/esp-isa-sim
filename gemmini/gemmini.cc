@@ -800,6 +800,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const uint16_t in_dim = gemmini_state.loop_conv_ws_in_dim;
   const uint16_t in_channels = gemmini_state.loop_conv_ws_in_channels;
   const uint16_t out_channels = gemmini_state.loop_conv_ws_out_channels;
+  const uint16_t out_channels_stride = gemmini_state.loop_conv_ws_out_channels_stride;
   const uint16_t out_dim = gemmini_state.loop_conv_ws_out_dim;
   const uint16_t pool_out_dim = gemmini_state.loop_conv_ws_pool_out_dim;
   const uint16_t stride = gemmini_state.loop_conv_ws_stride;
@@ -1056,7 +1057,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
             const uint32_t C_sp_addr = C_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
 
-            mvout(output + ((b*out_dim*out_dim + orow*out_dim + ocol) * out_channels + och) * sizeof(elem_t),
+            mvout(output + ((b*out_dim*out_dim + orow*out_dim + ocol) * out_channels_stride + och) * sizeof(elem_t),
                 ((uint64_t)I << 48) | ((uint64_t)J << 32) | C_sp_addr);
           }
         }
@@ -1073,7 +1074,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
       ((uint64_t)pool_size << 6) |
       ((uint64_t)pool_stride << 4) |
       2,
-      out_channels * sizeof(elem_t));
+      out_channels_stride * sizeof(elem_t));
 
     for (int b = 0; b < batches; b++) {
       for (int poch = 0; poch < pochs; poch += DIM) {
@@ -1081,13 +1082,13 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
         const uint32_t C_sp_addr = C_sp_addr_start + (poch / DIM) * batches * orows * ocols + b * orows * ocols;
 
-        mvout(output + ((b * pool_out_dim * pool_out_dim)*out_channels + poch) * sizeof(elem_t),
+        mvout(output + ((b * pool_out_dim * pool_out_dim)*out_channels_stride + poch) * sizeof(elem_t),
           ((uint64_t)channels << 32) | C_sp_addr);
       }
     }
 
     // gemmini_config_st(out_channels * sizeof(elem_t));
-    config(2, out_channels * sizeof(elem_t));
+    config(2, out_channels_stride * sizeof(elem_t));
   }
 }
 
@@ -1134,6 +1135,7 @@ void gemmini_t::loop_conv_ws_config_4(reg_t rs1, reg_t rs2) {
   gemmini_state.loop_conv_ws_pdpad = rs1 & 0xFFFF;
 
   gemmini_state.loop_conv_ws_ocols = rs2 & 0xFFFF;
+  gemmini_state.loop_conv_ws_out_channels_stride = (rs2 >> 16) & 0xFFFF;
 }
 
 void gemmini_t::loop_conv_ws_config_5(reg_t rs1, reg_t rs2) {
