@@ -793,6 +793,7 @@ void gemmini_t::loop_ws_config_strides_DC(reg_t rs1, reg_t rs2) {
 
 void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool no_bias = rs1 & 1;
+  const bool wrot180 = (rs1 >> 1) & 1;
   const bool no_pool = rs2 & 1;
   const bool downsample = (rs2 >> 1) & 1;
 
@@ -1007,11 +1008,15 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
                 const uint16_t J = ochs - och > DIM ? DIM : ochs - och;
                 const uint16_t K = (kchs - kch > DIM ? DIM : kchs - kch);
 
+                const bool new_weights = b == 0 && orow == 0 && ocol == 0;
+
                 const uint32_t A_sp_addr = A_sp_addr_start + (kch / DIM) * batches * DS(irows) * DS(icols) + b * DS(irows) * DS(icols) + DS(irow) * DS(icols) + DS(icol);
 
-                const bool new_weights = b == 0 && orow == 0 && ocol == 0;
+                const int krow_ = wrot180 ? krows - krow - 1 : krow;
+                const int kcol_ = wrot180 ? kcols - kcol - 1 : kcol;
+
                 const uint32_t B_sp_addr = new_weights ?
-                  (B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow * kcols * kchs + kcol * kchs + kch)
+                  (B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow_ * kcols * kchs + kcol_ * kchs + kch)
                   : GARBAGE_ADDR;
 
                 // perform matmul
