@@ -46,7 +46,8 @@ struct gemmini_state_t
   scale_t load_scales[LOAD_STATES];
 #endif
   acc_scale_t acc_shift;
-  uint16_t a_stride;
+  uint8_t c_stride;
+  uint8_t a_stride;
   uint8_t pool_stride;
   uint8_t pool_size;
   uint8_t pool_out_dim;
