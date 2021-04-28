@@ -58,6 +58,7 @@ struct gemmini_state_t
   uint16_t loop_ws_pad_I, loop_ws_pad_J, loop_ws_pad_K;
   uint64_t loop_ws_A, loop_ws_B, loop_ws_D, loop_ws_C;
   uint64_t loop_ws_A_stride, loop_ws_B_stride, loop_ws_D_stride, loop_ws_C_stride;
+  uint64_t dram_data_addr, dram_index_addr; // sparse pre-config
 
   bool enable;
 
@@ -93,6 +94,9 @@ public:
   void loop_ws_config_strides_AB(reg_t rs1, reg_t rs2);
   void loop_ws_config_strides_DC(reg_t rs1, reg_t rs2);
 
+  void mvin_sparse_config(reg_t dram_data_addr, reg_t dram_index_addr);
+  void mvin_sparse_coo(reg_t data, reg_t sp_addr, int state_id);
+
 private:
   gemmini_state_t gemmini_state;
   reg_t cause;
@@ -125,6 +129,11 @@ private:
   const unsigned config_repeating_bias_funct = 15;
   const unsigned config_reset_funct          = 16;
   const unsigned compute_cisc_funct          = 17;
+  //==========================================================================
+  // gemmini-sparse opcodes
+  //==========================================================================
+  const unsigned mvin_sp_config_funct = 18;
+  const unsigned mvin_sp_coo_funct = 19;
   //==========================================================================
 
   bool debug;
