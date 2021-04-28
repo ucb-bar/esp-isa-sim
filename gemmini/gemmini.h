@@ -70,7 +70,7 @@ struct gemmini_state_t
   uint16_t loop_conv_ws_krows, loop_conv_ws_kcols, loop_conv_ws_kchs, loop_conv_ws_lpad;
   uint16_t loop_conv_ws_rpad, loop_conv_ws_upad, loop_conv_ws_dpad, loop_conv_ws_plpad;
   uint16_t loop_conv_ws_prad, loop_conv_ws_pupad, loop_conv_ws_pdpad, loop_conv_ws_orows;
-  uint16_t loop_conv_ws_ocols;
+  uint16_t loop_conv_ws_ocols, loop_conv_ws_kernel_dilation;
   uint64_t loop_conv_ws_input, loop_conv_ws_weights, loop_conv_ws_output, loop_conv_ws_bias;
 
   bool enable;

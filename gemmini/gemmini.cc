@@ -813,6 +813,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const uint16_t stride = gemmini_state.loop_conv_ws_stride;
   const uint16_t padding = gemmini_state.loop_conv_ws_padding;
   const uint16_t kernel_dim = gemmini_state.loop_conv_ws_kernel_dim;
+  const uint16_t kernel_dilation = gemmini_state.loop_conv_ws_kernel_dilation;
   const uint16_t pool_size = gemmini_state.loop_conv_ws_pool_size;
   const uint16_t pool_stride = gemmini_state.loop_conv_ws_pool_stride;
   const uint16_t pool_padding = gemmini_state.loop_conv_ws_pool_padding;
@@ -844,13 +845,15 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
   // Calculate image dimensions
   // Note: "irows" and "icols" includes padding
-  const int16_t irows_without_dilation = orows * stride + krows - 1; // - 2 * padding;
-  const int16_t icols_without_dilation = ocols * stride + kcols - 1; // - 2 * padding;
+  const int16_t dilated_krows = krows + (kernel_dilation - 1)*(krows - 1);
+  const int16_t dilated_kcols = kcols + (kernel_dilation - 1)*(kcols - 1);
+  const int16_t irows_without_dilation = orows * stride + dilated_krows - 1; // - 2 * padding;
+  const int16_t icols_without_dilation = ocols * stride + dilated_kcols - 1; // - 2 * padding;
   const int16_t irows_unpadded_without_dilation = irows_without_dilation - upad - dpad;
   const int16_t icols_unpadded_without_dilation = icols_without_dilation - lpad - rpad;
   const int16_t ichs = kchs;
 
-#define UNDILATED(x) ((input_dilated) ? (((x)+1)/2) : (x))
+#define UNDILATED(x) (((x) + (input_dilated)) >> (input_dilated))
 
   const int16_t irows_unpadded = input_dilated ? (irows_unpadded_without_dilation+1)/2 : irows_unpadded_without_dilation;
   const int16_t icols_unpadded = input_dilated ? (icols_unpadded_without_dilation+1)/2 : icols_unpadded_without_dilation;
@@ -1006,18 +1009,18 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
           for (uint16_t b = 0; b < batches; b++) {
             for (uint16_t orow = 0; orow < orows; orow++) {
-              if (input_dilated && ((krow + orow - upad) % 2 != 0)) {
+              if (input_dilated && ((krow * kernel_dilation + orow - upad) % 2 != 0)) {
                 continue;
               }
 
               for (uint16_t ocol = 0; ocol < ocols;) {
-                if (input_dilated && ((kcol + ocol - lpad) % 2 != 0)) {
+                if (input_dilated && ((kcol * kernel_dilation + ocol - lpad) % 2 != 0)) {
                   ocol++;
                   continue;
                 }
 
-                const uint16_t irow = UNDILATED(orow * stride + krow);
-                const uint16_t icol = UNDILATED(ocol * stride + kcol);
+                const uint16_t irow = UNDILATED(orow * stride + krow * kernel_dilation);
+                const uint16_t icol = UNDILATED(ocol * stride + kcol * kernel_dilation);
 
                 const uint32_t C_sp_addr = C_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
 
@@ -1167,6 +1170,7 @@ void gemmini_t::loop_conv_ws_config_4(reg_t rs1, reg_t rs2) {
   gemmini_state.loop_conv_ws_pupad = (rs1 >> 16) & 0xFFFF;
   gemmini_state.loop_conv_ws_pdpad = rs1 & 0xFFFF;
 
+  gemmini_state.loop_conv_ws_kernel_dilation = (rs2 >> 16) & 0xFFFF;
   gemmini_state.loop_conv_ws_ocols = rs2 & 0xFFFF;
 }
 
