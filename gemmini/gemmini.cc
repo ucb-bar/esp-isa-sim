@@ -800,6 +800,7 @@ void gemmini_t::loop_ws_config_strides_DC(reg_t rs1, reg_t rs2) {
 void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool no_bias = rs1 & 1;
   const bool wrot180 = (rs1 >> 1) & 1;
+  const bool trans_output_1203 = (rs1 >> 2) & 1;
   const bool no_pool = rs2 & 1;
   const bool downsample = (rs2 >> 1) & 1;
   const bool input_dilated = (rs2 >> 2) & 1;
@@ -1093,7 +1094,12 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
             const uint32_t C_sp_addr = C_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
 
-            mvout(output + ((b*out_dim*out_dim + orow*out_dim + ocol) * out_channels + och) * sizeof(elem_t),
+            auto out = output + ((b*out_dim*out_dim + orow*out_dim + ocol) * out_channels + och) * sizeof(elem_t);
+            if (trans_output_1203) {
+                out = output + (orow*out_dim*batch_size + ocol*batch_size + b) * out_channels + och * sizeof(elem_t);
+            }
+
+            mvout(out,
                 ((uint64_t)I << 48) | ((uint64_t)J << 32) | C_sp_addr);
           }
         }
