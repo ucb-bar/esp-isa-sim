@@ -801,6 +801,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool no_bias = rs1 & 1;
   const bool wrot180 = (rs1 >> 1) & 1;
   const bool trans_output_1203 = (rs1 >> 2) & 1;
+  const bool trans_weight_1203 = (rs1 >> 3) & 1;
   const bool no_pool = rs2 & 1;
   const bool downsample = (rs2 >> 1) & 1;
   const bool input_dilated = (rs2 >> 2) & 1;
@@ -973,11 +974,15 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
     const uint16_t max_ochs_per_mvin = ochs < MAX_BLOCK_LEN * DIM ? ochs :
       MAX_BLOCK_LEN * DIM;
 
+    const size_t dram_stride = trans_weight_1203 ?
+        kernel_dim * kernel_dim * out_channels * sizeof(elem_t) :
+        out_channels * sizeof(elem_t);
+
     // gemmini_extended4_config_ld(out_channels * sizeof(elem_t), MVIN_SCALE_IDENTITY, false, krows * kcols * kchs, 1);
     config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
       ((uint64_t)(krows * kcols * kchs) << 16) |
       (1 << 3) | 1,
-      out_channels * sizeof(elem_t));
+      dram_stride);
 
     for (uint16_t och = 0; och < ochs; och += max_ochs_per_mvin) {
       const uint16_t J = ochs - och > max_ochs_per_mvin ?
@@ -990,11 +995,16 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
             const uint32_t B_sp_addr = B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow * kcols * kchs + kcol * kchs + kch;
 
-            // gemmini_extended_mvin2(weights + (krow*kernel_dim*in_channels + kcol*in_channels + kch) * out_channels + och,
+            auto w = weights + ((krow*kernel_dim*in_channels + kcol*in_channels + kch) * out_channels + och)*sizeof(elem_t);
+            if (trans_weight_1203) {
+                w = weights + ((kch * kernel_dim * kernel_dim  + krow * kernel_dim + kcol) * out_channels + och)*sizeof(elem_t);
+            }
+
+            // gemmini_extended_mvin2(w,
             //   B_sp_addr,
             //   J, K);
 
-            mvin(weights + ((krow*kernel_dim*in_channels + kcol*in_channels + kch) * out_channels + och)*sizeof(elem_t),
+            mvin(w,
               ((uint64_t)K << 48) | ((uint64_t)J << 32) | B_sp_addr,
               1);
           }
@@ -1096,7 +1106,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
             auto out = output + ((b*out_dim*out_dim + orow*out_dim + ocol) * out_channels + och) * sizeof(elem_t);
             if (trans_output_1203) {
-                out = output + (orow*out_dim*batch_size + ocol*batch_size + b) * out_channels + och * sizeof(elem_t);
+              out = output + (orow*out_dim*batch_size + ocol*batch_size + b) * out_channels + och * sizeof(elem_t);
             }
 
             mvout(out,
