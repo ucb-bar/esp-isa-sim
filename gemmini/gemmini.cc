@@ -802,6 +802,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool wrot180 = (rs1 >> 1) & 1;
   const bool trans_output_1203 = (rs1 >> 2) & 1;
   const bool trans_weight_1203 = (rs1 >> 3) & 1;
+  const bool trans_weight_0132 = (rs1 >> 4) & 1;
   const bool no_pool = rs2 & 1;
   const bool downsample = (rs2 >> 1) & 1;
   const bool input_dilated = (rs2 >> 2) & 1;
@@ -864,7 +865,10 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const int16_t icols = input_dilated ? icols_unpadded + UNDILATED(lpad) + UNDILATED(rpad) : icols_without_dilation;
 
   const int out_channels_per_bank = ochs / DIM + (ochs % DIM != 0);
-  const int B_rows = out_channels_per_bank * kcols * krows * kchs;
+  const int in_channels_per_bank = kchs / DIM + (kchs % DIM != 0);
+  const int B_rows = trans_weight_0132 ?
+      in_channels_per_bank * kcols * krows * ochs :
+      out_channels_per_bank * kcols * krows * kchs;
 
   static uint32_t D_sp_addr_row = 0;
   static uint32_t C_sp_addr_row = 0;
@@ -971,33 +975,53 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
   // mvin weights
   {
-    const uint16_t max_ochs_per_mvin = ochs < MAX_BLOCK_LEN * DIM ? ochs :
+    uint16_t max_chs_per_mvin = ochs < MAX_BLOCK_LEN * DIM ? ochs :
       MAX_BLOCK_LEN * DIM;
+    if (trans_weight_0132) {
+      max_chs_per_mvin = kchs < MAX_BLOCK_LEN * DIM ? kchs :
+          MAX_BLOCK_LEN * DIM;
+    }
 
-    const size_t dram_stride = trans_weight_1203 ?
-        kernel_dim * kernel_dim * out_channels * sizeof(elem_t) :
-        out_channels * sizeof(elem_t);
+    size_t dram_stride = out_channels * sizeof(elem_t);
+    if (trans_weight_1203) {
+      dram_stride = kernel_dim * kernel_dim * out_channels * sizeof(elem_t);
+    } else if (trans_weight_0132) {
+      dram_stride = in_channels * sizeof(elem_t);
+    }
+
+    const size_t spad_block_stride = trans_weight_0132 ?
+      krows * kcols * ochs : krows * kcols * kchs;
 
     // gemmini_extended4_config_ld(out_channels * sizeof(elem_t), MVIN_SCALE_IDENTITY, false, krows * kcols * kchs, 1);
     config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
-      ((uint64_t)(krows * kcols * kchs) << 16) |
+      ((uint64_t)(spad_block_stride) << 16) |
       (1 << 3) | 1,
       dram_stride);
 
-    for (uint16_t och = 0; och < ochs; och += max_ochs_per_mvin) {
-      const uint16_t J = ochs - och > max_ochs_per_mvin ?
-        max_ochs_per_mvin : ochs - och;
+    const size_t och_it = trans_weight_0132 ? DIM : max_chs_per_mvin;
+    const size_t kch_it = trans_weight_0132 ? max_chs_per_mvin : DIM;
 
+    for (uint16_t och = 0; och < ochs; och += och_it) {
       for (uint16_t krow = 0; krow < krows; krow++)
         for (uint16_t kcol = 0; kcol < kcols; kcol++)
-          for (uint16_t kch = 0; kch < kchs; kch += DIM) {
-            const uint16_t K = kchs - kch > DIM ? DIM : kchs - kch;
+          for (uint16_t kch = 0; kch < kchs; kch += kch_it) {
+            uint16_t K = kchs - kch > DIM ? DIM : kchs - kch;
+            uint16_t J = ochs - och > max_chs_per_mvin ? max_chs_per_mvin : ochs - och;
+            if (trans_weight_0132) {
+              K = ochs - och > DIM ? DIM : ochs - och;
+              J = kchs - kch > max_chs_per_mvin ? max_chs_per_mvin : kchs - kch;
+            }
 
-            const uint32_t B_sp_addr = B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow * kcols * kchs + kcol * kchs + kch;
+            uint32_t B_sp_addr = B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow * kcols * kchs + kcol * kchs + kch;
+            if (trans_weight_0132) {
+              B_sp_addr = B_sp_addr_start + (kch / DIM) * krows * kcols * ochs + krow * kcols * ochs + kcol * ochs + och;
+            }
 
             auto w = weights + ((krow*kernel_dim*in_channels + kcol*in_channels + kch) * out_channels + och)*sizeof(elem_t);
             if (trans_weight_1203) {
-                w = weights + ((kch * kernel_dim * kernel_dim  + krow * kernel_dim + kcol) * out_channels + och)*sizeof(elem_t);
+              w = weights + ((kch * kernel_dim * kernel_dim  + krow * kernel_dim + kcol) * out_channels + och)*sizeof(elem_t);
+            } else if (trans_weight_0132) {
+              w = weights + ((krow * kernel_dim * out_channels + kcol * out_channels + och) * in_channels + kch)*sizeof(elem_t);
             }
 
             // gemmini_extended_mvin2(w,
@@ -1055,15 +1079,18 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
                 const int krow_ = wrot180 ? krows - krow - 1 : krow;
                 const int kcol_ = wrot180 ? kcols - kcol - 1 : kcol;
 
-                const uint32_t B_sp_addr = new_weights ?
-                  (B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow_ * kcols * kchs + kcol_ * kchs + kch)
-                  : GARBAGE_ADDR;
+                uint32_t B_sp_addr = B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow_ * kcols * kchs + kcol_ * kchs + kch;
+                if (trans_weight_0132) {
+                  B_sp_addr = B_sp_addr_start + (kch / DIM) * krows * kcols * ochs + krow_ * kcols * ochs + kcol_ * ochs + och;
+                }
+
+                const uint32_t pre_sp_addr = new_weights ? B_sp_addr : GARBAGE_ADDR;
 
                 // perform matmul
                 const uint32_t out_sp_addr = C_sp_addr;
 
                 /*
-                gemmini_extended_preload(B_sp_addr, out_sp_addr,
+                gemmini_extended_preload(pre_sp_addr, out_sp_addr,
                         J, K, J, I);
 
                 if (new_weights) {
@@ -1073,7 +1100,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
                 }
                 */
 
-                preload(((uint64_t)K << 48) | ((uint64_t)J << 32) | B_sp_addr,
+                preload(((uint64_t)K << 48) | ((uint64_t)J << 32) | pre_sp_addr,
                     ((uint64_t)I << 48) | ((uint64_t)J << 32) | out_sp_addr);
                 compute(((uint64_t)I << 48) | ((uint64_t)K << 32) | A_sp_addr,
                     ((uint64_t)I << 48) | ((uint64_t)J << 32) | GARBAGE_ADDR, new_weights);
