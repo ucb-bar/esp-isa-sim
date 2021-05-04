@@ -807,6 +807,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool trans_output_1203 = (rs1 >> 2) & 1;
   const bool trans_weight_1203 = (rs1 >> 3) & 1;
   const bool trans_weight_0132 = (rs1 >> 4) & 1;
+  const bool trans_input_3120 = (rs1 >> 5) & 1;
   const bool no_pool = rs2 & 1;
   const bool downsample = (rs2 >> 1) & 1;
   const bool input_dilated = (rs2 >> 2) & 1;
@@ -927,16 +928,31 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
   // mvin input
   {
-    const int16_t max_ichs_per_mvin = ichs < MAX_BLOCK_LEN * DIM ? ichs :
+    int16_t max_chs_per_mvin = ichs < MAX_BLOCK_LEN * DIM ? ichs :
       MAX_BLOCK_LEN * DIM;
+    if (trans_input_3120) {
+      max_chs_per_mvin = batches < MAX_BLOCK_LEN * DIM ? batches :
+        MAX_BLOCK_LEN * DIM;
+    }
 
-    // gemmini_extended4_config_ld(in_channels * sizeof(elem_t), MVIN_SCALE_IDENTITY, false, batches * irows * icols, 0);
+    const uint32_t dram_stride = trans_input_3120 ?
+      batch_size * sizeof(elem_t) :
+      in_channels * sizeof(elem_t);
+
+    const int spad_stride = trans_input_3120 ?
+      ichs * DS(irows) * DS(icols) :
+      batches * DS(irows) * DS(icols);
+
+    // gemmini_extended4_config_ld(dram_stride << downsample, MVIN_SCALE_IDENTITY, false, spad_stride, 0);
     config(((uint64_t)scale_t_to_scale_t_bits(MVIN_SCALE_IDENTITY) << 32) |
-      ((uint64_t)(batches * DS(irows) * DS(icols)) << 16) |
+      ((uint64_t)(spad_stride) << 16) |
       (0 << 3) | 1,
-      US(in_channels * sizeof(elem_t)));
+      US(dram_stride));
 
-    for (int16_t b = 0; b < batches; b++)
+    const int b_it = trans_input_3120 ? max_chs_per_mvin : 1;
+    const int ich_it = trans_input_3120 ? 1 : max_chs_per_mvin;
+
+    for (int16_t b = 0; b < batches; b += b_it)
       for (int16_t irow = -UNDILATED(upad); irow < irows_unpadded + UNDILATED(dpad); irow += US(1)) {
         const int16_t irow_padded = irow + UNDILATED(upad);
 
@@ -953,16 +969,27 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
 
           const int16_t icol_padded = icol + UNDILATED(lpad);
 
-          for (int16_t ich = 0; ich < ichs; ich += max_ichs_per_mvin) {
-            const int16_t K = ichs - ich > max_ichs_per_mvin ?
-              max_ichs_per_mvin : ichs - ich;
+          for (int16_t ich = 0; ich < ichs; ich += ich_it) {
+            int16_t K = ichs - ich > max_chs_per_mvin ?
+              max_chs_per_mvin : ichs - ich;
+            if (trans_input_3120) {
+              K = batches - b > max_chs_per_mvin ?
+                max_chs_per_mvin : batches - b;
+            }
 
-            const uint32_t A_sp_addr = A_sp_addr_start + (ich / DIM) * batches * DS(irows) * DS(icols) + b * DS(irows) * DS(icols) + DS(irow_padded) * DS(icols) + DS(icol_padded);
+            uint32_t A_sp_addr = A_sp_addr_start + (ich / DIM) * spad_stride + b * DS(irows) * DS(icols) + DS(irow_padded) * DS(icols) + DS(icol_padded);
+            if (trans_input_3120) {
+              A_sp_addr = A_sp_addr_start + (b / DIM) * spad_stride + ich * DS(irows) * DS(icols) + DS(irow_padded) * DS(icols) + DS(icol_padded);
+            }
 
             const bool is_zeros = irow < 0 || irow >= irows_unpadded || icol < 0 || icol >= icols_unpadded;
 
-            const uint64_t in = is_zeros ? 0 :
-              input + ((b*in_dim*in_dim + irow*in_dim + icol) * in_channels + ich) * sizeof(elem_t);
+            uint64_t in = input + ((b*in_dim*in_dim + irow*in_dim + icol) * in_channels + ich) * sizeof(elem_t);
+            if (is_zeros) {
+              in = 0;
+            } else if (trans_input_3120) {
+              in = input + ((ich*in_dim*in_dim + irow*in_dim + icol) * batch_size + b) * sizeof(elem_t);
+            }
 
             // gemmini_extended_mvin(in,
             //     A_sp_addr,
@@ -1040,77 +1067,98 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   }
 
   // Compute
-  for (uint16_t och = 0; och < ochs; och += DIM) {
-    for (uint16_t krow = 0; krow < krows; krow++) {
-      for (uint16_t kcol = 0; kcol < kcols; kcol++) {
-        for (uint16_t kch = 0; kch < kchs; kch += DIM) {
-          bool new_weights = true;
+  {
+    const int b_it = trans_input_3120 ? DIM : 1;
+    const int ocol_it = trans_input_3120 ? 1 : (DIM << input_dilated);
 
-          for (uint16_t b = 0; b < batches; b++) {
-            for (uint16_t orow = 0; orow < orows; orow++) {
-              if (input_dilated && ((krow * kernel_dilation + orow - upad) % 2 != 0)) {
-                continue;
-              }
+    if (trans_input_3120) {
+      // gemmini_extended3_config_ex(0, 0, 0, 0, 0, orows * ocols, irows * icols, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, true);
+      const uint16_t a_stride = irows * icols;
+      const uint16_t c_stride = orows * ocols;
+      const bool set_only_strides = true;
+      config(((uint64_t)a_stride << 16) | (set_only_strides << 7) | 0,
+        ((uint64_t)c_stride << 48));
+    }
 
-              for (uint16_t ocol = 0; ocol < ocols;) {
-                if (input_dilated && ((kcol * kernel_dilation + ocol - lpad) % 2 != 0)) {
-                  ocol++;
+    for (uint16_t och = 0; och < ochs; och += DIM) {
+      for (uint16_t krow = 0; krow < krows; krow++) {
+        for (uint16_t kcol = 0; kcol < kcols; kcol++) {
+          for (uint16_t kch = 0; kch < kchs; kch += DIM) {
+            bool new_weights = true;
+
+            for (uint16_t b = 0; b < batches; b += b_it) {
+              for (uint16_t orow = 0; orow < orows; orow++) {
+                if (input_dilated && ((krow * kernel_dilation + orow - upad) % 2 != 0)) {
                   continue;
                 }
 
-                const uint16_t irow = UNDILATED(orow * stride + krow * kernel_dilation);
-                const uint16_t icol = UNDILATED(ocol * stride + kcol * kernel_dilation);
+                for (uint16_t ocol = 0; ocol < ocols;) {
+                  if (input_dilated && ((kcol * kernel_dilation + ocol - lpad) % 2 != 0)) {
+                    ocol++;
+                    continue;
+                  }
 
-                const uint32_t C_sp_addr = C_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
+                  const uint16_t irow = UNDILATED(orow * stride + krow * kernel_dilation);
+                  const uint16_t icol = UNDILATED(ocol * stride + kcol * kernel_dilation);
 
-                // Over here, construct a new matrix
-                //
-                // Let us assume that we only ever operate on
-                // one pixel in one row.
-                // Thus, krow == kcol == 1
-                //
-                // Then, for every set of I, J, and K values
-                //   - I = ocol
-                //   - J = och
-                //   - K = kch
+                  const uint32_t C_sp_addr = C_sp_addr_start + (och / DIM) * batches * orows * ocols + b * orows * ocols + orow * ocols + ocol;
 
-                const uint16_t I = UNDILATED(ocols - ocol > (DIM << input_dilated) ? (DIM << input_dilated) : ocols - ocol);
-                const uint16_t J = ochs - och > DIM ? DIM : ochs - och;
-                const uint16_t K = (kchs - kch > DIM ? DIM : kchs - kch);
+                  // Over here, construct a new matrix
+                  //
+                  // Let us assume that we only ever operate on
+                  // one pixel in one row.
+                  // Thus, krow == kcol == 1
+                  //
+                  // Then, for every set of I, J, and K values
+                  //   - I = ocol
+                  //   - J = och
+                  //   - K = kch
 
-                const uint32_t A_sp_addr = A_sp_addr_start + (kch / DIM) * batches * DS(irows) * DS(icols) + b * DS(irows) * DS(icols) + DS(irow) * DS(icols) + DS(icol);
+                  uint16_t I = UNDILATED(ocols - ocol > (DIM << input_dilated) ? (DIM << input_dilated) : ocols - ocol);
+                  const uint16_t J = ochs - och > DIM ? DIM : ochs - och;
+                  const uint16_t K = (kchs - kch > DIM ? DIM : kchs - kch);
 
-                const int krow_ = wrot180 ? krows - krow - 1 : krow;
-                const int kcol_ = wrot180 ? kcols - kcol - 1 : kcol;
+                  if (trans_input_3120) {
+                    I = batches - b > DIM ? DIM : batches - b;
+                  }
 
-                uint32_t B_sp_addr = B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow_ * kcols * kchs + kcol_ * kchs + kch;
-                if (trans_weight_0132) {
-                  B_sp_addr = B_sp_addr_start + (kch / DIM) * krows * kcols * ochs + krow_ * kcols * ochs + kcol_ * ochs + och;
+                  uint32_t A_sp_addr = A_sp_addr_start + (kch / DIM) * batches * DS(irows) * DS(icols) + b * DS(irows) * DS(icols) + DS(irow) * DS(icols) + DS(icol);
+                  if (trans_input_3120) {
+                    A_sp_addr = A_sp_addr_start + (b / DIM) * kchs * DS(irows) * DS(icols) + kch * DS(irows) * DS(icols) + DS(irow) * DS(icols) + DS(icol);
+                  }
+
+                  const int krow_ = wrot180 ? krows - krow - 1 : krow;
+                  const int kcol_ = wrot180 ? kcols - kcol - 1 : kcol;
+
+                  uint32_t B_sp_addr = B_sp_addr_start + (och / DIM) * krows * kcols * kchs + krow_ * kcols * kchs + kcol_ * kchs + kch;
+                  if (trans_weight_0132) {
+                    B_sp_addr = B_sp_addr_start + (kch / DIM) * krows * kcols * ochs + krow_ * kcols * ochs + kcol_ * ochs + och;
+                  }
+
+                  const uint32_t pre_sp_addr = new_weights ? B_sp_addr : GARBAGE_ADDR;
+
+                  // perform matmul
+                  const uint32_t out_sp_addr = C_sp_addr;
+
+                  /*
+                  gemmini_extended_preload(pre_sp_addr, out_sp_addr,
+                          J, K, J, I);
+
+                  if (new_weights) {
+                    gemmini_extended_compute_preloaded(A_sp_addr, GARBAGE_ADDR, K, I, J, I);
+                  } else {
+                    gemmini_extended_compute_accumulated(A_sp_addr, GARBAGE_ADDR, K, I, J, I);
+                  }
+                  */
+
+                  preload(((uint64_t)K << 48) | ((uint64_t)J << 32) | pre_sp_addr,
+                      ((uint64_t)I << 48) | ((uint64_t)J << 32) | out_sp_addr);
+                  compute(((uint64_t)I << 48) | ((uint64_t)K << 32) | A_sp_addr,
+                      ((uint64_t)I << 48) | ((uint64_t)J << 32) | GARBAGE_ADDR, new_weights);
+
+                  ocol += ocol_it;
+                  new_weights = false;
                 }
-
-                const uint32_t pre_sp_addr = new_weights ? B_sp_addr : GARBAGE_ADDR;
-
-                // perform matmul
-                const uint32_t out_sp_addr = C_sp_addr;
-
-                /*
-                gemmini_extended_preload(pre_sp_addr, out_sp_addr,
-                        J, K, J, I);
-
-                if (new_weights) {
-                  gemmini_extended_compute_preloaded(A_sp_addr, GARBAGE_ADDR, K, I, J, I);
-                } else {
-                  gemmini_extended_compute_accumulated(A_sp_addr, GARBAGE_ADDR, K, I, J, I);
-                }
-                */
-
-                preload(((uint64_t)K << 48) | ((uint64_t)J << 32) | pre_sp_addr,
-                    ((uint64_t)I << 48) | ((uint64_t)J << 32) | out_sp_addr);
-                compute(((uint64_t)I << 48) | ((uint64_t)K << 32) | A_sp_addr,
-                    ((uint64_t)I << 48) | ((uint64_t)J << 32) | GARBAGE_ADDR, new_weights);
-
-                ocol += DIM << input_dilated;
-                new_weights = false;
               }
             }
           }
