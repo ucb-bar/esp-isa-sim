@@ -99,7 +99,7 @@
 #define MASK_VMSV  0xfff0707f
 #define MASK_VMVV  0xfff0707f
 #define MASK_VSETCFG  0x7fff
-#define MASK_HVSETVL  0xfff0707f
+#define MASK_VSETVL  0xfff0707f
 #define MASK_VSSEGB  0x1ff0707f
 #define MASK_VSSEGD  0x1ff0707f
 #define MASK_VSSEGH  0x1ff0707f
@@ -147,7 +147,7 @@
 #define MATCH_VMSV 0x200202b
 #define MATCH_VMVV 0x200002b
 #define MATCH_VSETCFG 0x200b
-#define MATCH_HVSETVL 0x600b
+#define MATCH_VSETVL 0x600b
 #define MATCH_VSSEGB 0x207b
 #define MATCH_VSSEGD 0x600207b
 #define MATCH_VSSEGH 0x200207b

@@ -6,5 +6,5 @@ WRITE_VL(vl);
 WRITE_XRD(vl);
 
 #ifdef RISCV_ENABLE_HCOMMITLOG
-  printf("H: HVSETVL maxvl=%d vl=%d\n", MAXVL,vl);
+  printf("H: VSETVL maxvl=%d vl=%d\n", MAXVL,vl);
 #endif
