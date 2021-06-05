@@ -709,9 +709,10 @@ enable_commitlog
 enable_histogram
 enable_dirty
 enable_misaligned
+enable_dual_endian
 enable_hcommitlog
 enable_gemminicommitlog
-enable_dual_endian
+enable_keccak
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1360,11 +1361,12 @@ Optional Features:
                           bits
   --enable-misaligned     Enable hardware support for misaligned loads and
                           stores
+  --enable-dual-endian    Enable support for running target in either
+                          endianness
   --enable-hcommitlog     Enable Hwacha commit log generation
   --enable-gemminicommitlog
                           Enable Gemmini commit log generation
-  --enable-dual-endian    Enable support for running target in either
-                          endianness
+  --enable-keccak         Enable Keccak behavior for sha3
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -5010,6 +5012,178 @@ fi
 
     # Add subproject to our running list
 
+    subprojects="$subprojects hwacha"
+
+    # Process the subproject appropriately. If enabled add it to the
+    # $enabled_subprojects running shell variable, set a
+    # SUBPROJECT_ENABLED C define, and include the appropriate
+    # 'subproject.ac'.
+
+
+      { $as_echo "$as_me:${as_lineno-$LINENO}: configuring default subproject : hwacha" >&5
+$as_echo "$as_me: configuring default subproject : hwacha" >&6;}
+      ac_config_files="$ac_config_files hwacha.mk:hwacha/hwacha.mk.in"
+
+      enable_hwacha_sproj="yes"
+      subprojects_enabled="$subprojects_enabled hwacha"
+
+$as_echo "#define HWACHA_ENABLED /**/" >>confdefs.h
+
+      # Check whether --enable-hcommitlog was given.
+if test "${enable_hcommitlog+set}" = set; then :
+  enableval=$enable_hcommitlog;
+fi
+
+if test "x$enable_hcommitlog" = "xyes"; then :
+
+
+$as_echo "#define RISCV_ENABLE_HCOMMITLOG /**/" >>confdefs.h
+
+
+fi
+
+
+
+
+
+
+    # Determine if this is a required or an optional subproject
+
+
+
+    # Determine if there is a group with the same name
+
+
+
+    # Create variations of the subproject name suitable for use as a CPP
+    # enabled define, a shell enabled variable, and a shell function
+
+
+
+
+
+
+
+
+
+
+
+    # Add subproject to our running list
+
+    subprojects="$subprojects gemmini"
+
+    # Process the subproject appropriately. If enabled add it to the
+    # $enabled_subprojects running shell variable, set a
+    # SUBPROJECT_ENABLED C define, and include the appropriate
+    # 'subproject.ac'.
+
+
+      { $as_echo "$as_me:${as_lineno-$LINENO}: configuring default subproject : gemmini" >&5
+$as_echo "$as_me: configuring default subproject : gemmini" >&6;}
+      ac_config_files="$ac_config_files gemmini.mk:gemmini/gemmini.mk.in"
+
+      enable_gemmini_sproj="yes"
+      subprojects_enabled="$subprojects_enabled gemmini"
+
+$as_echo "#define GEMMINI_ENABLED /**/" >>confdefs.h
+
+      # Check whether --enable-gemminicommitlog was given.
+if test "${enable_gemminicommitlog+set}" = set; then :
+  enableval=$enable_gemminicommitlog;
+fi
+
+if test "x$enable_gemminicommitlog" = "xyes"; then :
+
+
+$as_echo "#define RISCV_ENABLE_GEMMINI_COMMITLOG /**/" >>confdefs.h
+
+
+fi
+
+
+
+
+
+    # Determine if this is a required or an optional subproject
+
+
+
+    # Determine if there is a group with the same name
+
+
+
+    # Create variations of the subproject name suitable for use as a CPP
+    # enabled define, a shell enabled variable, and a shell function
+
+
+
+
+
+
+
+
+
+
+
+    # Add subproject to our running list
+
+    subprojects="$subprojects sha3"
+
+    # Process the subproject appropriately. If enabled add it to the
+    # $enabled_subprojects running shell variable, set a
+    # SUBPROJECT_ENABLED C define, and include the appropriate
+    # 'subproject.ac'.
+
+
+      { $as_echo "$as_me:${as_lineno-$LINENO}: configuring default subproject : sha3" >&5
+$as_echo "$as_me: configuring default subproject : sha3" >&6;}
+      ac_config_files="$ac_config_files sha3.mk:sha3/sha3.mk.in"
+
+      enable_sha3_sproj="yes"
+      subprojects_enabled="$subprojects_enabled sha3"
+
+$as_echo "#define SHA3_ENABLED /**/" >>confdefs.h
+
+      # Check whether --enable-keccak was given.
+if test "${enable_keccak+set}" = set; then :
+  enableval=$enable_keccak;
+fi
+
+if test "x$enable_keccak" = "xyes"; then :
+
+
+$as_echo "#define SHA3_ENABLE_KECCAK /**/" >>confdefs.h
+
+
+fi
+
+
+
+
+
+    # Determine if this is a required or an optional subproject
+
+
+
+    # Determine if there is a group with the same name
+
+
+
+    # Create variations of the subproject name suitable for use as a CPP
+    # enabled define, a shell enabled variable, and a shell function
+
+
+
+
+
+
+
+
+
+
+
+    # Add subproject to our running list
+
     subprojects="$subprojects disasm"
 
     # Process the subproject appropriately. If enabled add it to the
@@ -5100,124 +5274,6 @@ $as_echo "#define CUSTOMEXT_ENABLED /**/" >>confdefs.h
 
     # Add subproject to our running list
 
-    subprojects="$subprojects hwacha"
-
-    # Process the subproject appropriately. If enabled add it to the
-    # $enabled_subprojects running shell variable, set a
-    # SUBPROJECT_ENABLED C define, and include the appropriate
-    # 'subproject.ac'.
-
-
-      { $as_echo "$as_me:${as_lineno-$LINENO}: configuring default subproject : hwacha" >&5
-$as_echo "$as_me: configuring default subproject : hwacha" >&6;}
-      ac_config_files="$ac_config_files hwacha.mk:hwacha/hwacha.mk.in"
-
-      enable_hwacha_sproj="yes"
-      subprojects_enabled="$subprojects_enabled hwacha"
-
-$as_echo "#define HWACHA_ENABLED /**/" >>confdefs.h
-
-      # Check whether --enable-hcommitlog was given.
-if test "${enable_hcommitlog+set}" = set; then :
-  enableval=$enable_hcommitlog;
-fi
-
-if test "x$enable_hcommitlog" = "xyes"; then :
-
-
-$as_echo "#define RISCV_ENABLE_HCOMMITLOG /**/" >>confdefs.h
-
-
-fi
-
-
-
-
-
-
-    # Determine if this is a required or an optional subproject
-
-
-
-    # Determine if there is a group with the same name
-
-
-
-    # Create variations of the subproject name suitable for use as a CPP
-    # enabled define, a shell enabled variable, and a shell function
-
-
-
-
-
-
-
-
-
-
-
-    # Add subproject to our running list
-
-    subprojects="$subprojects gemmini"
-
-    # Process the subproject appropriately. If enabled add it to the
-    # $enabled_subprojects running shell variable, set a
-    # SUBPROJECT_ENABLED C define, and include the appropriate
-    # 'subproject.ac'.
-
-
-      { $as_echo "$as_me:${as_lineno-$LINENO}: configuring default subproject : gemmini" >&5
-$as_echo "$as_me: configuring default subproject : gemmini" >&6;}
-      ac_config_files="$ac_config_files gemmini.mk:gemmini/gemmini.mk.in"
-
-      enable_gemmini_sproj="yes"
-      subprojects_enabled="$subprojects_enabled gemmini"
-
-$as_echo "#define GEMMINI_ENABLED /**/" >>confdefs.h
-
-
-
-      # Check whether --enable-gemminicommitlog was given.
-if test "${enable_gemminicommitlog+set}" = set; then :
-  enableval=$enable_gemminicommitlog;
-fi
-
-if test "x$enable_gemminicommitlog" = "xyes"; then :
-
-
-$as_echo "#define RISCV_ENABLE_GEMMINI_COMMITLOG /**/" >>confdefs.h
-
-
-fi
-
-
-
-
-
-    # Determine if this is a required or an optional subproject
-
-
-
-    # Determine if there is a group with the same name
-
-
-
-    # Create variations of the subproject name suitable for use as a CPP
-    # enabled define, a shell enabled variable, and a shell function
-
-
-
-
-
-
-
-
-
-
-
-    # Add subproject to our running list
-
-    subprojects="$subprojects dummy_rocc"
     subprojects="$subprojects fdt"
 
     # Process the subproject appropriately. If enabled add it to the
@@ -5408,6 +5464,8 @@ ac_config_files="$ac_config_files riscv-hwacha.pc"
 ac_config_files="$ac_config_files riscv-gemmini.pc"
 
 ac_config_files="$ac_config_files riscv-disasm.pc"
+
+ac_config_files="$ac_config_files riscv-sha3.pc"
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -6104,6 +6162,7 @@ do
     "riscv.mk") CONFIG_FILES="$CONFIG_FILES riscv.mk:riscv/riscv.mk.in" ;;
     "hwacha.mk") CONFIG_FILES="$CONFIG_FILES hwacha.mk:hwacha/hwacha.mk.in" ;;
     "gemmini.mk") CONFIG_FILES="$CONFIG_FILES gemmini.mk:gemmini/gemmini.mk.in" ;;
+    "sha3.mk") CONFIG_FILES="$CONFIG_FILES sha3.mk:sha3/sha3.mk.in" ;;
     "disasm.mk") CONFIG_FILES="$CONFIG_FILES disasm.mk:disasm/disasm.mk.in" ;;
     "customext.mk") CONFIG_FILES="$CONFIG_FILES customext.mk:customext/customext.mk.in" ;;
     "fdt.mk") CONFIG_FILES="$CONFIG_FILES fdt.mk:fdt/fdt.mk.in" ;;
@@ -6116,6 +6175,7 @@ do
     "riscv-hwacha.pc") CONFIG_FILES="$CONFIG_FILES riscv-hwacha.pc" ;;
     "riscv-gemmini.pc") CONFIG_FILES="$CONFIG_FILES riscv-gemmini.pc" ;;
     "riscv-disasm.pc") CONFIG_FILES="$CONFIG_FILES riscv-disasm.pc" ;;
+    "riscv-sha3.pc") CONFIG_FILES="$CONFIG_FILES riscv-sha3.pc" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
   esac

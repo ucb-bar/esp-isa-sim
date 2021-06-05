@@ -27,6 +27,9 @@
 /* Define if subproject MCPPBS_SPROJ_NORM is enabled */
 #undef FESVR_ENABLED
 
+/* Define if subproject MCPPBS_SPROJ_NORM is enabled */
+#undef GEMMINI_ENABLED
+
 /* Dynamic library loading is supported */
 #undef HAVE_DLOPEN
 
@@ -90,19 +93,26 @@
 /* Enable hardware management of PTE accessed and dirty bits */
 #undef RISCV_ENABLE_DIRTY
 
-/* Enable Hwacha commit log generation */
-#undef RISCV_ENABLE_HCOMMITLOG
+/* Enable support for running target in either endianness */
+#undef RISCV_ENABLE_DUAL_ENDIAN
 
 /* Enable Gemmini commit log generation */
 #undef RISCV_ENABLE_GEMMINI_COMMITLOG
-/* Enable support for running target in either endianness */
-#undef RISCV_ENABLE_DUAL_ENDIAN
+
+/* Enable Hwacha commit log generation */
+#undef RISCV_ENABLE_HCOMMITLOG
 
 /* Enable PC histogram generation */
 #undef RISCV_ENABLE_HISTOGRAM
 
 /* Enable hardware support for misaligned loads and stores */
 #undef RISCV_ENABLE_MISALIGNED
+
+/* Define if subproject MCPPBS_SPROJ_NORM is enabled */
+#undef SHA3_ENABLED
+
+/* Enable Keccak behavior for sha3 */
+#undef SHA3_ENABLE_KECCAK
 
 /* Define if subproject MCPPBS_SPROJ_NORM is enabled */
 #undef SOFTFLOAT_ENABLED
