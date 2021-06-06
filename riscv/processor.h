@@ -23,18 +23,12 @@ class trap_t;
 class extension_t;
 class disassembler_t;
 
-typedef char archen_t;
-const   archen_t ARCHEN_RV32_ONLY=1;
-const   archen_t ARCHEN_RV64_ONLY=2;
-const   archen_t ARCHEN_ANY      =7;
-
 struct insn_desc_t
 {
   insn_bits_t match;
   insn_bits_t mask;
   insn_func_t rv32;
   insn_func_t rv64;
-  char        archen; // 0x7=all arches, 0x2=rv64 only, 0x1=rv32 only etc
 };
 
 // regnum, data
@@ -249,7 +243,11 @@ typedef enum {
 
 typedef enum {
   // 65('A') ~ 90('Z') is reserved for standard isa in misa
-  EXT_ZFH   = 0,
+  EXT_ZFH,
+  EXT_ZBA,
+  EXT_ZBB,
+  EXT_ZBC,
+  EXT_ZBS,
 } isa_extension_t;
 
 typedef enum {
@@ -479,7 +477,8 @@ private:
   void build_opcode_map();
   void register_base_instructions();
   insn_func_t decode_insn(insn_t insn);
-  reg_t cal_satp(reg_t val) const;
+  bool satp_valid(reg_t val) const;
+  reg_t compute_new_satp(reg_t val, reg_t old) const;
 
   // Track repeated executions for processor_t::disasm()
   uint64_t last_pc, last_bits, executions;
@@ -513,7 +512,7 @@ public:
 #ifdef WORDS_BIGENDIAN
           // "V" spec 0.7.1 requires lower indices to map to lower significant
           // bits when changing SEW, thus we need to index from the end on BE.
-  	  n ^= elts_per_reg - 1;
+          n ^= elts_per_reg - 1;
 #endif
           reg_referenced[vReg] = 1;
 

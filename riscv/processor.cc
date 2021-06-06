@@ -8,6 +8,7 @@
 #include "simif.h"
 #include "mmu.h"
 #include "disasm.h"
+#include "platform.h"
 #include <cinttypes>
 #include <cmath>
 #include <cstdlib>
@@ -210,7 +211,7 @@ void processor_t::parse_isa_string(const char* str)
 
   char error_msg[256];
   const char* p = lowercase.c_str();
-  const char* all_subsets = "imafdqcbkh"
+  const char* all_subsets = "imafdqcbkhp"
 #ifdef __SIZEOF_INT128__
     "v"
 #endif
@@ -244,7 +245,7 @@ void processor_t::parse_isa_string(const char* str)
         p++;
       } else if (*p == 'x') {
         const char* ext = p + 1, *end = ext;
-        while (islower(*end) || *end == '_')
+        while (islower(*end))
           end++;
 
         auto ext_str = std::string(ext, end - ext);
@@ -269,6 +270,14 @@ void processor_t::parse_isa_string(const char* str)
       auto ext_str = std::string(ext, end - ext);
       if (ext_str == "zfh") {
         extension_table[EXT_ZFH] = true;
+      } else if (ext_str == "zba") {
+        extension_table[EXT_ZBA] = true;
+      } else if (ext_str == "zbb") {
+        extension_table[EXT_ZBB] = true;
+      } else if (ext_str == "zbc") {
+        extension_table[EXT_ZBC] = true;
+      } else if (ext_str == "zbs") {
+        extension_table[EXT_ZBS] = true;
       } else {
         sprintf(error_msg, "unsupported extension '%s'", ext_str.c_str());
         bad_isa_string(str, error_msg);
@@ -282,6 +291,14 @@ void processor_t::parse_isa_string(const char* str)
   }
 
   state.misa = max_isa;
+
+  if (supports_extension('B')) {
+    // B implies Zba, Zbb, Zbc, Zbs
+    extension_table[EXT_ZBA] = true;
+    extension_table[EXT_ZBB] = true;
+    extension_table[EXT_ZBC] = true;
+    extension_table[EXT_ZBS] = true;
+  }
 
   if (!supports_extension('I'))
     bad_isa_string(str, "'I' extension is required");
@@ -562,7 +579,7 @@ void processor_t::take_interrupt(reg_t pending_interrupts)
     deleg = state.mideleg & ~state.hideleg;
     status = (state.v) ? state.vsstatus : state.mstatus;
     hsie = get_field(status, MSTATUS_SIE);
-    hs_enabled = state.prv < PRV_S || (state.prv == PRV_S && hsie);
+    hs_enabled = state.v || state.prv < PRV_S || (state.prv == PRV_S && hsie);
     enabled_interrupts = pending_interrupts & deleg & -hs_enabled;
     if (state.v && enabled_interrupts == 0) {
       // VS-ints have least priority and can only be taken with virt enabled
@@ -667,11 +684,11 @@ void processor_t::enter_debug_mode(uint8_t cause)
 void processor_t::take_trap(trap_t& t, reg_t epc)
 {
   if (debug) {
-    fprintf(log_file, "core %3d: exception %s, epc 0x%016" PRIx64 "\n",
-            id, t.name(), epc);
+    fprintf(log_file, "core %3d: exception %s, epc 0x%0*" PRIx64 "\n",
+            id, t.name(), max_xlen/4, zext(epc, max_xlen));
     if (t.has_tval())
-      fprintf(log_file, "core %3d:           tval 0x%016" PRIx64 "\n",
-              id, t.get_tval());
+      fprintf(log_file, "core %3d:           tval 0x%0*" PRIx64 "\n",
+              id, max_xlen/4, zext(t.get_tval(), max_xlen));
   }
 
   if (state.debug_mode) {
@@ -780,8 +797,9 @@ void processor_t::disasm(insn_t insn)
       fprintf(log_file, "core %3d: Executed %" PRIx64 " times\n", id, executions);
     }
 
-    fprintf(log_file, "core %3d: 0x%016" PRIx64 " (0x%08" PRIx64 ") %s\n",
-            id, state.pc, bits, disassembler->disassemble(insn).c_str());
+    fprintf(log_file, "core %3d: 0x%0*" PRIx64 " (0x%08" PRIx64 ") %s\n",
+            id, max_xlen/4, zext(state.pc, max_xlen), bits,
+            disassembler->disassemble(insn).c_str());
     last_pc = state.pc;
     last_bits = bits;
     executions = 1;
@@ -796,39 +814,36 @@ int processor_t::paddr_bits()
   return max_xlen == 64 ? 50 : 34;
 }
 
-reg_t processor_t::cal_satp(reg_t val) const
+bool processor_t::satp_valid(reg_t val) const
 {
-  reg_t reg_val = 0;
-  reg_t rv64_ppn_mask = (reg_t(1) << (MAX_PADDR_BITS - PGSHIFT)) - 1;
-  mmu->flush_tlb();
-  if (max_xlen == 32) {
-    reg_val = val & (SATP32_PPN |
-                    (supports_impl(IMPL_MMU_SV32) ? SATP32_MODE : 0));
-  }
-
-  if (max_xlen == 64 && (get_field(val, SATP64_MODE) == SATP_MODE_OFF ||
-                         get_field(val, SATP64_MODE) == SATP_MODE_SV39 ||
-                         get_field(val, SATP64_MODE) == SATP_MODE_SV48)) {
-    reg_val = val & (SATP64_PPN | rv64_ppn_mask);
-    reg_t mode = get_field(val, SATP64_MODE);
-
-    switch(mode) {
-      case SATP_MODE_OFF:
-      default:
-        mode = SATP_MODE_OFF;
-        break;
-      case SATP_MODE_SV39:
-        mode = supports_impl(IMPL_MMU_SV39) ? SATP_MODE_SV39 : SATP_MODE_OFF;
-        break;
-      case SATP_MODE_SV48:
-        mode = supports_impl(IMPL_MMU_SV48) ? SATP_MODE_SV48 : SATP_MODE_OFF;
-        break;
+  if (xlen == 32) {
+    switch (get_field(val, SATP32_MODE)) {
+      case SATP_MODE_SV32: return supports_impl(IMPL_MMU_SV32);
+      case SATP_MODE_OFF: return true;
+      default: return false;
     }
-    reg_val = set_field(reg_val, SATP64_MODE, mode);
+  } else {
+    switch (get_field(val, SATP64_MODE)) {
+      case SATP_MODE_SV39: return supports_impl(IMPL_MMU_SV39);
+      case SATP_MODE_SV48: return supports_impl(IMPL_MMU_SV48);
+      case SATP_MODE_OFF: return true;
+      default: return false;
+    }
   }
-
-  return reg_val;
 }
+
+reg_t processor_t::compute_new_satp(reg_t val, reg_t old) const
+{
+  reg_t rv64_ppn_mask = (reg_t(1) << (MAX_PADDR_BITS - PGSHIFT)) - 1;
+
+  reg_t mode_mask = xlen == 32 ? SATP32_MODE : SATP64_MODE;
+  reg_t ppn_mask = xlen == 32 ? SATP32_PPN : SATP64_PPN & rv64_ppn_mask;
+  reg_t new_mask = (satp_valid(val) ? mode_mask : 0) | ppn_mask;
+  reg_t old_mask = satp_valid(val) ? 0 : mode_mask;
+
+  return (new_mask & val) | (old_mask & old);
+}
+
 void processor_t::set_csr(int which, reg_t val)
 {
 #if defined(RISCV_ENABLE_COMMITLOG)
@@ -1039,10 +1054,14 @@ void processor_t::set_csr(int which, reg_t val)
       if (!supports_impl(IMPL_MMU))
         val = 0;
 
-      if (state.v)
-        state.vsatp = cal_satp(val);
-      else
-        state.satp = cal_satp(val);
+      if (satp_valid(val)) {
+        mmu->flush_tlb();
+
+        if (state.v)
+          state.vsatp = compute_new_satp(val, state.vsatp);
+        else
+          state.satp = compute_new_satp(val, state.satp);
+      }
       break;
     case CSR_SEPC:
       if (state.v)
@@ -1167,16 +1186,22 @@ void processor_t::set_csr(int which, reg_t val)
       state.htinst = val;
       break;
     case CSR_HGATP: {
-      reg_t reg_val = 0;
-      reg_t rv64_ppn_mask = (reg_t(1) << (MAX_PADDR_BITS - PGSHIFT)) - 1;
       mmu->flush_tlb();
-      if (max_xlen == 32)
-        reg_val = val & (HGATP32_PPN | HGATP32_MODE);
-      if (max_xlen == 64 && (get_field(val, HGATP64_MODE) == HGATP_MODE_OFF ||
-                             get_field(val, HGATP64_MODE) == HGATP_MODE_SV39X4 ||
-                             get_field(val, HGATP64_MODE) == HGATP_MODE_SV48X4))
-        reg_val = val & (HGATP64_MODE | (HGATP64_PPN & rv64_ppn_mask));
-      state.hgatp = reg_val;
+
+      reg_t mask;
+      if (max_xlen == 32) {
+        mask = HGATP32_PPN | HGATP32_MODE;
+      } else {
+        mask = HGATP64_PPN & ((reg_t(1) << (MAX_PADDR_BITS - PGSHIFT)) - 1);
+
+        if (get_field(val, HGATP64_MODE) == HGATP_MODE_OFF ||
+            get_field(val, HGATP64_MODE) == HGATP_MODE_SV39X4 ||
+            get_field(val, HGATP64_MODE) == HGATP_MODE_SV48X4)
+          mask |= HGATP64_MODE;
+      }
+      mask &= ~(reg_t)3;
+
+      state.hgatp = val & mask;
       break;
     }
     case CSR_VSSTATUS: {
@@ -1211,7 +1236,8 @@ void processor_t::set_csr(int which, reg_t val)
       if (!supports_impl(IMPL_MMU))
         val = 0;
 
-      state.vsatp = cal_satp(val);
+      mmu->flush_tlb();
+      state.vsatp = compute_new_satp(val, state.vsatp);
       break;
     case CSR_TSELECT:
       if (val < state.num_triggers) {
@@ -1432,11 +1458,11 @@ reg_t processor_t::get_csr(int which, insn_t insn, bool write, bool peek)
     case CSR_MENTROPY:
       if(!supports_extension('K'))
           break;
-      return es.get_mentropy();
+      ret(es.get_mentropy());
     case CSR_MNOISE:
       if(!supports_extension('K'))
           break;
-      return es.get_mnoise();
+      ret(es.get_mnoise());
     case CSR_FFLAGS:
       require_fp;
       if (!supports_extension('F'))
@@ -1736,14 +1762,13 @@ out:
     return res;
 
   unsigned csr_priv = get_field(which, 0x300);
-  bool csr_read_only = get_field(which, 0xC00) == 3;
   unsigned priv = state.prv == PRV_S && !state.v ? PRV_HS : state.prv;
 
   if ((csr_priv == PRV_S && !supports_extension('S')) ||
       (csr_priv == PRV_HS && !supports_extension('H')))
     goto throw_illegal;
 
-  if ((write && csr_read_only) || priv < csr_priv) {
+  if (priv < csr_priv) {
     if (state.v && csr_priv <= PRV_HS)
       goto throw_virtual;
     goto throw_illegal;
@@ -1763,17 +1788,14 @@ insn_func_t processor_t::decode_insn(insn_t insn)
   size_t idx = insn.bits() % OPCODE_CACHE_SIZE;
   insn_desc_t desc = opcode_cache[idx];
 
-  archen_t current_arch         = xlen >> 5;
-  bool     insn_valid_for_arch  = (desc.archen & current_arch) != 0;
-
-  if (unlikely(insn.bits() != desc.match || insn_valid_for_arch == false)) {
+  if (unlikely(insn.bits() != desc.match || !(xlen == 64 ? desc.rv64 : desc.rv32))) {
     // fall back to linear search
+    int cnt = 0;
     insn_desc_t* p = &instructions[0];
-    while ((insn.bits() & p->mask) != p->match      ||
-        (p->archen & current_arch) == 0)
-      p++;
+    while ((insn.bits() & p->mask) != p->match || !(xlen == 64 ? p->rv64 : p->rv32))
+      p++, cnt++;
     desc = *p;
-    
+
     if (p->mask != 0 && p > &instructions[0]) {
       if (p->match != (p-1)->match && p->match != (p+1)->match) {
         // move to front of opcode list to reduce miss penalty
@@ -1832,9 +1854,9 @@ void processor_t::register_base_instructions()
 {
   #define DECLARE_INSN(name, match, mask) \
     insn_bits_t name##_match = (match), name##_mask = (mask); \
-    archen_t name##_arch_en = ARCHEN_ANY;
-  #define DECLARE_RV32_ONLY(name) {name##_arch_en=ARCHEN_RV32_ONLY;}
-  #define DECLARE_RV64_ONLY(name) {name##_arch_en=ARCHEN_RV64_ONLY;}
+    unsigned name##_arch_en = (unsigned)-1;
+  #define DECLARE_RV32_ONLY(name) {name##_arch_en = 32;}
+  #define DECLARE_RV64_ONLY(name) {name##_arch_en = 64;}
 
   #include "encoding.h"
   #undef DECLARE_RV64_INSN
@@ -1842,7 +1864,13 @@ void processor_t::register_base_instructions()
   #undef DECLARE_INSN
 
   #define DEFINE_INSN(name) \
-    REGISTER_INSN(this, name, name##_match, name##_mask, name##_arch_en)
+    extern reg_t rv32_##name(processor_t*, insn_t, reg_t); \
+    extern reg_t rv64_##name(processor_t*, insn_t, reg_t); \
+    register_insn((insn_desc_t){ \
+      name##_match, \
+      name##_mask, \
+      (name##_arch_en & 32) ? rv32_##name : nullptr, \
+      (name##_arch_en & 64) ? rv64_##name : nullptr});
   #include "insn_list.h"
   #undef DEFINE_INSN
 
