@@ -1519,3 +1519,18 @@ acc_t_bits gemmini_t::acc_t_to_acc_t_bits(acc_t x) {
   return un.b;
 }
 #endif
+
+define_custom_func(gemmini_t, "gemmini", gemmini_custom3, custom3)
+
+std::vector<insn_desc_t> gemmini_t::get_instructions()
+{
+  std::vector<insn_desc_t> insns;
+  push_custom_insn(insns, ROCC_OPCODE3, ROCC_OPCODE_MASK, ILLEGAL_INSN_FUNC, gemmini_custom3);
+  return insns;
+}
+
+std::vector<disasm_insn_t*> gemmini_t::get_disasms()
+{
+  std::vector<disasm_insn_t*> insns;
+  return insns;
+}

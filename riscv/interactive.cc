@@ -69,6 +69,7 @@ void sim_t::interactive()
   funcs["vreg"] = &sim_t::interactive_vreg;
   funcs["reg"] = &sim_t::interactive_reg;
   funcs["freg"] = &sim_t::interactive_freg;
+  funcs["fregh"] = &sim_t::interactive_fregh;
   funcs["fregs"] = &sim_t::interactive_fregs;
   funcs["fregd"] = &sim_t::interactive_fregd;
   funcs["pc"] = &sim_t::interactive_pc;
@@ -118,12 +119,13 @@ void sim_t::interactive_help(const std::string& cmd, const std::vector<std::stri
   std::cerr <<
     "Interactive commands:\n"
     "reg <core> [reg]                # Display [reg] (all if omitted) in <core>\n"
+    "fregh <core> <reg>              # Display half precision <reg> in <core>\n"
     "fregs <core> <reg>              # Display single precision <reg> in <core>\n"
     "fregd <core> <reg>              # Display double precision <reg> in <core>\n"
     "vreg <core> [reg]               # Display vector [reg] (all if omitted) in <core>\n"
     "pc <core>                       # Show current PC in <core>\n"
     "mem <hex addr>                  # Show contents of physical memory\n"
-    "str <hex addr>                  # Show NUL-terminated C string\n"
+    "str <core> <hex addr>           # Show NUL-terminated C string at <hex addr> in core <core>\n"
     "until reg <core> <reg> <val>    # Stop when <reg> in <core> hits <val>\n"
     "until pc <core> <val>           # Stop when PC in <core> hits <val>\n"
     "untiln pc <core> <val>          # Run noisy and stop when PC in <core> hits <val>\n"
@@ -177,7 +179,12 @@ reg_t sim_t::get_pc(const std::vector<std::string>& args)
 
 void sim_t::interactive_pc(const std::string& cmd, const std::vector<std::string>& args)
 {
-  fprintf(stderr, "0x%016" PRIx64 "\n", get_pc(args));
+  if(args.size() != 1)
+    throw trap_interactive();
+
+  processor_t *p = get_core(args[0]);
+  int max_xlen = p->get_max_xlen();
+  fprintf(stderr, "0x%0*" PRIx64 "\n", max_xlen/4, zext(get_pc(args), max_xlen));
 }
 
 reg_t sim_t::get_reg(const std::vector<std::string>& args)
@@ -270,17 +277,24 @@ void sim_t::interactive_vreg(const std::string& cmd, const std::vector<std::stri
 
 void sim_t::interactive_reg(const std::string& cmd, const std::vector<std::string>& args)
 {
+  if(args.size() < 1)
+     throw trap_interactive();
+
+  processor_t *p = get_core(args[0]);
+  int max_xlen = p->get_max_xlen();
+
   if (args.size() == 1) {
     // Show all the regs!
-    processor_t *p = get_core(args[0]);
 
     for (int r = 0; r < NXPR; ++r) {
-      fprintf(stderr, "%-4s: 0x%016" PRIx64 "  ", xpr_name[r], p->get_state()->XPR[r]);
+      fprintf(stderr, "%-4s: 0x%0*" PRIx64 "  ", xpr_name[r], max_xlen/4,
+              zext(p->get_state()->XPR[r], max_xlen));
       if ((r + 1) % 4 == 0)
         fprintf(stderr, "\n");
     }
-  } else
-    fprintf(stderr, "0x%016" PRIx64 "\n", get_reg(args));
+  } else {
+    fprintf(stderr, "0x%0*" PRIx64 "\n", max_xlen/4, zext(get_reg(args), max_xlen));
+  }
 }
 
 union fpr
@@ -294,6 +308,13 @@ void sim_t::interactive_freg(const std::string& cmd, const std::vector<std::stri
 {
   freg_t r = get_freg(args);
   fprintf(stderr, "0x%016" PRIx64 "%016" PRIx64 "\n", r.v[1], r.v[0]);
+}
+
+void sim_t::interactive_fregh(const std::string& cmd, const std::vector<std::string>& args)
+{
+  fpr f;
+  f.r = freg(f16_to_f32(f16(get_freg(args))));
+  fprintf(stderr, "%g\n", isBoxedF32(f.r) ? (double)f.s : NAN);
 }
 
 void sim_t::interactive_fregs(const std::string& cmd, const std::vector<std::string>& args)
@@ -349,18 +370,29 @@ reg_t sim_t::get_mem(const std::vector<std::string>& args)
 
 void sim_t::interactive_mem(const std::string& cmd, const std::vector<std::string>& args)
 {
-  fprintf(stderr, "0x%016" PRIx64 "\n", get_mem(args));
+  int max_xlen = procs[0]->get_max_xlen();
+
+  fprintf(stderr, "0x%0*" PRIx64 "\n", max_xlen/4, zext(get_mem(args), max_xlen));
 }
 
 void sim_t::interactive_str(const std::string& cmd, const std::vector<std::string>& args)
 {
-  if(args.size() != 1)
+  if(args.size() != 1 && args.size() != 2)
     throw trap_interactive();
 
-  reg_t addr = strtol(args[0].c_str(),NULL,16);
+  std::string addr_str = args[0];
+  mmu_t* mmu = debug_mmu;
+  if(args.size() == 2)
+  {
+    processor_t *p = get_core(args[0]);
+    mmu = p->get_mmu();
+    addr_str = args[1];
+  }
+
+  reg_t addr = strtol(addr_str.c_str(),NULL,16);
 
   char ch;
-  while((ch = debug_mmu->load_uint8(addr++)))
+  while((ch = mmu->load_uint8(addr++)))
     putchar(ch);
 
   putchar('\n');
@@ -386,6 +418,10 @@ void sim_t::interactive_until(const std::string& cmd, const std::vector<std::str
   reg_t val = strtol(args[args.size()-1].c_str(),NULL,16);
   if(val == LONG_MAX)
     val = strtoul(args[args.size()-1].c_str(),NULL,16);
+
+  // mask bits above max_xlen
+  int max_xlen = procs[strtol(args[1].c_str(),NULL,10)]->get_max_xlen();
+  if (max_xlen == 32) val &= 0xFFFFFFFF;
   
   std::vector<std::string> args2;
   args2 = std::vector<std::string>(args.begin()+1,args.end()-1);
@@ -405,6 +441,9 @@ void sim_t::interactive_until(const std::string& cmd, const std::vector<std::str
     try
     {
       reg_t current = (this->*func)(args2);
+
+      // mask bits above max_xlen
+      if (max_xlen == 32) current &= 0xFFFFFFFF;
 
       if (cmd_until == (current == val))
         break;

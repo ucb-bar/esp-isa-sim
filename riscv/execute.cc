@@ -2,6 +2,7 @@
 
 #include "processor.h"
 #include "mmu.h"
+#include "disasm.h"
 #include <cassert>
 
 #ifdef RISCV_ENABLE_COMMITLOG
@@ -23,38 +24,44 @@ static void commit_log_stash_privilege(processor_t* p)
 static void commit_log_print_value(FILE *log_file, int width, const void *data)
 {
   assert(log_file);
-  const uint64_t *arr = (const uint64_t *)data;
-
-  fprintf(log_file, "0x");
-  for (int idx = width / 64 - 1; idx >= 0; --idx) {
-    fprintf(log_file, "%016" PRIx64, arr[idx]);
-  }
-}
-
-static void commit_log_print_value(FILE *log_file,
-                                   int width, uint64_t hi, uint64_t lo)
-{
-  assert(log_file);
 
   switch (width) {
     case 8:
-      fprintf(log_file, "0x%01" PRIx8, (uint8_t)lo);
+      fprintf(log_file, "0x%01" PRIx8, *(const uint8_t *)data);
       break;
     case 16:
-      fprintf(log_file, "0x%04" PRIx16, (uint16_t)lo);
+      fprintf(log_file, "0x%04" PRIx16, *(const uint16_t *)data);
       break;
     case 32:
-      fprintf(log_file, "0x%08" PRIx32, (uint32_t)lo);
+      fprintf(log_file, "0x%08" PRIx32, *(const uint32_t *)data);
       break;
     case 64:
-      fprintf(log_file, "0x%016" PRIx64, lo);
-      break;
-    case 128:
-      fprintf(log_file, "0x%016" PRIx64 "%016" PRIx64, hi, lo);
+      fprintf(log_file, "0x%016" PRIx64, *(const uint64_t *)data);
       break;
     default:
-      abort();
+      // max lengh of vector
+      if (((width - 1) & width) == 0) {
+        const uint64_t *arr = (const uint64_t *)data;
+
+        fprintf(log_file, "0x");
+        for (int idx = width / 64 - 1; idx >= 0; --idx) {
+          fprintf(log_file, "%016" PRIx64, arr[idx]);
+        }
+      } else {
+        abort();
+      }
+      break;
   }
+}
+
+static void commit_log_print_value(FILE *log_file, int width, uint64_t val)
+{
+  commit_log_print_value(log_file, width, &val);
+}
+
+const char* processor_t::get_symbol(uint64_t addr)
+{
+  return sim->get_symbol(addr);
 }
 
 static void commit_log_print_insn(processor_t *p, reg_t pc, insn_t insn)
@@ -68,10 +75,13 @@ static void commit_log_print_insn(processor_t *p, reg_t pc, insn_t insn)
   int xlen = p->get_state()->last_inst_xlen;
   int flen = p->get_state()->last_inst_flen;
 
+  // print core id on all lines so it is easy to grep
+  fprintf(log_file, "core%4" PRId32 ": ", p->get_id());
+
   fprintf(log_file, "%1d ", priv);
-  commit_log_print_value(log_file, xlen, 0, pc);
+  commit_log_print_value(log_file, xlen, pc);
   fprintf(log_file, " (");
-  commit_log_print_value(log_file, insn.length() * 8, 0, insn.bits());
+  commit_log_print_value(log_file, insn.length() * 8, insn.bits());
   fprintf(log_file, ")");
   bool show_vec = false;
 
@@ -81,10 +91,10 @@ static void commit_log_print_insn(processor_t *p, reg_t pc, insn_t insn)
 
     char prefix;
     int size;
-    int rd = item.first >> 2;
+    int rd = item.first >> 4;
     bool is_vec = false;
     bool is_vreg = false;
-    switch (item.first & 3) {
+    switch (item.first & 0xf) {
     case 0:
       size = xlen;
       prefix = 'x';
@@ -101,35 +111,46 @@ static void commit_log_print_insn(processor_t *p, reg_t pc, insn_t insn)
     case 3:
       is_vec = true;
       break;
+    case 4:
+      size = xlen;
+      prefix = 'c';
+      break;
     default:
       assert("can't been here" && 0);
       break;
     }
 
     if (!show_vec && (is_vreg || is_vec)) {
-        fprintf(log_file, " e%ld m%ld l%ld", p->VU.vsew, p->VU.vlmul, p->VU.vl);
+        fprintf(log_file, " e%ld %s%ld l%ld",
+                p->VU.vsew,
+                p->VU.vflmul < 1 ? "mf" : "m",
+                p->VU.vflmul < 1 ? (reg_t)(1 / p->VU.vflmul) : (reg_t)p->VU.vflmul,
+                p->VU.vl);
         show_vec = true;
     }
 
     if (!is_vec) {
-      fprintf(log_file, " %c%2d ", prefix, rd);
+      if (prefix == 'c')
+        fprintf(log_file, " c%d_%s ", rd, csr_name(rd));
+      else
+        fprintf(log_file, " %c%2d ", prefix, rd);
       if (is_vreg)
         commit_log_print_value(log_file, size, &p->VU.elt<uint8_t>(rd, 0));
       else
-        commit_log_print_value(log_file, size, item.second.v[1], item.second.v[0]);
+        commit_log_print_value(log_file, size, item.second.v);
     }
   }
 
   for (auto item : load) {
     fprintf(log_file, " mem ");
-    commit_log_print_value(log_file, xlen, 0, std::get<0>(item));
+    commit_log_print_value(log_file, xlen, std::get<0>(item));
   }
 
   for (auto item : store) {
     fprintf(log_file, " mem ");
-    commit_log_print_value(log_file, xlen, 0, std::get<0>(item));
+    commit_log_print_value(log_file, xlen, std::get<0>(item));
     fprintf(log_file, " ");
-    commit_log_print_value(log_file, std::get<2>(item) << 3, 0, std::get<1>(item));
+    commit_log_print_value(log_file, std::get<2>(item) << 3, std::get<1>(item));
   }
   fprintf(log_file, "\n");
 }
@@ -153,18 +174,40 @@ static reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
 {
   commit_log_reset(p);
   commit_log_stash_privilege(p);
+  reg_t npc;
 
-  reg_t npc = fetch.func(p, fetch.insn, pc);
-  if (npc != PC_SERIALIZE_BEFORE) {
+  try {
+    npc = fetch.func(p, fetch.insn, pc);
+    if (npc != PC_SERIALIZE_BEFORE) {
 
 #ifdef RISCV_ENABLE_COMMITLOG
-    if (p->get_log_commits_enabled()) {
-      commit_log_print_insn(p, pc, fetch.insn);
-    }
+      if (p->get_log_commits_enabled()) {
+        commit_log_print_insn(p, pc, fetch.insn);
+      }
 #endif
 
-    p->update_histogram(pc);
+     }
+#ifdef RISCV_ENABLE_COMMITLOG
+  } catch (wait_for_interrupt_t &t) {
+      commit_log_print_insn(p, pc, fetch.insn);
+      throw;
+  } catch(mem_trap_t& t) {
+      //handle segfault in midlle of vector load/store
+      if (p->get_log_commits_enabled()) {
+        for (auto item : p->get_state()->log_reg_write) {
+          if ((item.first & 3) == 3) {
+            commit_log_print_insn(p, pc, fetch.insn);
+            break;
+          }
+        }
+      }
+      throw;
+#endif
+  } catch(...) {
+    throw;
   }
+  p->update_histogram(pc);
+
   return npc;
 }
 
@@ -177,8 +220,10 @@ bool processor_t::slow_path()
 void processor_t::step(size_t n)
 {
   if (!state.debug_mode) {
-    if (halt_request) {
+    if (halt_request == HR_REGULAR) {
       enter_debug_mode(DCSR_CAUSE_DEBUGINT);
+    } else if (halt_request == HR_GROUP) {
+      enter_debug_mode(DCSR_CAUSE_GROUP);
     } // !!!The halt bit in DCSR is deprecated.
     else if (state.dcsr.halt) {
       enter_debug_mode(DCSR_CAUSE_HALT);
@@ -211,6 +256,7 @@ void processor_t::step(size_t n)
 
       if (unlikely(slow_path()))
       {
+        // Main simulation loop, slow path.
         while (instret < n)
         {
           if (unlikely(!state.serialized && state.single_step == state.STEP_STEPPED)) {
@@ -235,49 +281,17 @@ void processor_t::step(size_t n)
       }
       else while (instret < n)
       {
-        // This code uses a modified Duff's Device to improve the performance
-        // of executing instructions. While typical Duff's Devices are used
-        // for software pipelining, the switch statement below primarily
-        // benefits from separate call points for the fetch.func function call
-        // found in each execute_insn. This function call is an indirect jump
-        // that depends on the current instruction. By having an indirect jump
-        // dedicated for each icache entry, you improve the performance of the
-        // host's next address predictor. Each case in the switch statement
-        // allows for the program flow to contine to the next case if it
-        // corresponds to the next instruction in the program and instret is
-        // still less than n.
-        //
-        // According to Andrew Waterman's recollection, this optimization
-        // resulted in approximately a 2x performance increase.
-
-        // This figures out where to jump to in the switch statement
-        size_t idx = _mmu->icache_index(pc);
-
-        // This gets the cached decoded instruction from the MMU. If the MMU
-        // does not have the current pc cached, it will refill the MMU and
-        // return the correct entry. ic_entry->data.func is the C++ function
-        // corresponding to the instruction.
-        auto ic_entry = _mmu->access_icache(pc);
-
-        // This macro is included in "icache.h" included within the switch
-        // statement below. The indirect jump corresponding to the instruction
-        // is located within the execute_insn() function call.
-        #define ICACHE_ACCESS(i) { \
-          insn_fetch_t fetch = ic_entry->data; \
-          pc = execute_insn(this, pc, fetch); \
-          ic_entry = ic_entry->next; \
-          if (i == mmu_t::ICACHE_ENTRIES-1) break; \
-          if (unlikely(ic_entry->tag != pc)) break; \
-          if (unlikely(instret+1 == n)) break; \
-          instret++; \
-          state.pc = pc; \
-        }
-
-        // This switch statement implements the modified Duff's device as
-        // explained above.
-        switch (idx) {
-          // "icache.h" is generated by the gen_icache script
-          #include "icache.h"
+        // Main simulation loop, fast path.
+        for (auto ic_entry = _mmu->access_icache(pc); ; ) {
+          auto fetch = ic_entry->data;
+          pc = execute_insn(this, pc, fetch);
+          ic_entry = ic_entry->next;
+          if (unlikely(ic_entry->tag != pc))
+            break;
+          if (unlikely(instret + 1 == n))
+            break;
+          instret++;
+          state.pc = pc;
         }
 
         advance_pc();
@@ -313,7 +327,7 @@ void processor_t::step(size_t n)
           enter_debug_mode(DCSR_CAUSE_HWBP);
           break;
         case ACTION_DEBUG_EXCEPTION: {
-          mem_trap_t trap(CAUSE_BREAKPOINT, t.address);
+          insn_trap_t trap(CAUSE_BREAKPOINT, t.address);
           take_trap(trap, pc);
           break;
         }
@@ -329,7 +343,7 @@ void processor_t::step(size_t n)
       // In the debug ROM this prevents us from wasting time looping, but also
       // allows us to switch to other threads only once per idle loop in case
       // there is activity.
-      n = instret;
+      n = ++instret;
     }
 
     state.minstret += instret;

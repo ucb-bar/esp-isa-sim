@@ -85,7 +85,7 @@ struct gemmini_state_t
   bool repeating_bias;
 };
 
-class gemmini_t : public rocc_t
+class gemmini_t : public extension_t
 {
 public:
   gemmini_t() : cause(0), aux(0), debug(false) {}
@@ -116,6 +116,9 @@ public:
   void loop_conv_ws_config_4(reg_t rs1, reg_t rs2);
   void loop_conv_ws_config_5(reg_t rs1, reg_t rs2);
   void loop_conv_ws_config_6(reg_t rs1, reg_t rs2);
+
+  virtual std::vector<insn_desc_t> get_instructions();
+  virtual std::vector<disasm_insn_t*> get_disasms();
 
 private:
   gemmini_state_t gemmini_state;
