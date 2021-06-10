@@ -74,6 +74,7 @@ struct gemmini_state_t
   uint64_t loop_conv_ws_input, loop_conv_ws_weights, loop_conv_ws_output, loop_conv_ws_bias;
 
   bool enable;
+  bool resetted = false;
 
   std::vector<std::vector<elem_t>> spad; // Scratchpad constructed as systolic array rows
   std::vector<std::vector<acc_t>> pe_state; // Stores each PE's internal accumulator state
