@@ -36,6 +36,8 @@ void gemmini_state_t::reset()
   m = n = k = 0;
   repeating_bias = false;
 
+  resetted = true;
+
   printf("Gemmini extension configured with:\n");
   printf("    dim = %u\n", DIM);
 }
@@ -1280,6 +1282,10 @@ void gemmini_t::loop_conv_ws_config_6(reg_t rs1, reg_t rs2) {
 }
 
 reg_t gemmini_t::CUSTOMFN(XCUSTOM_ACC)(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
+  if (!gemmini_state.resetted) {
+    reset();
+  }
+
   if (insn.funct == mvin_funct) {
     mvin(xs1, xs2, 0);
   } else if (insn.funct == mvin2_funct) {
