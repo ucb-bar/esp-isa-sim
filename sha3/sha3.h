@@ -33,6 +33,7 @@ public:
 
   void reset()
   {
+    reset_called = true;
     msg_addr = 0;
     hash_addr = 0;
     msg_len = 0;
@@ -40,6 +41,8 @@ public:
 
   reg_t custom2(rocc_insn_t insn, reg_t xs1, reg_t xs2)
   {
+    if (!reset_called) reset();
+
     switch (insn.funct)
     {
       case 0: // setup msg and hash addr
@@ -84,6 +87,7 @@ private:
   reg_t msg_addr;
   reg_t hash_addr;
   reg_t msg_len;
+  bool reset_called = false;
 
 
 typedef struct {
