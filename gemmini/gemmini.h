@@ -12,6 +12,9 @@ static const uint32_t sp_matrices = (BANK_NUM * BANK_ROWS) / DIM; // Size the sc
 static const uint32_t accum_rows = ACC_ROWS; // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the scratchpad/accumulator
 #define LOAD_STATES 3
+// WARNING: If you change this, you must also change the bits in the counter op config register decoding union in gemmini.cc.
+#define NUM_COUNTERS 8
+#define NUM_EXTERNAL_COUNTERS 6 
 
 // #define RISCV_ENABLE_GEMMINI_COMMITLOG
 
@@ -73,6 +76,15 @@ struct gemmini_state_t
   uint16_t loop_conv_ws_ocols, loop_conv_ws_kernel_dilation;
   uint64_t loop_conv_ws_input, loop_conv_ws_weights, loop_conv_ws_output, loop_conv_ws_bias;
 
+  // Counter
+  uint32_t counter_val[NUM_COUNTERS];
+  uint32_t counter_snapshot_val[NUM_COUNTERS];
+  uint16_t counter_config[NUM_COUNTERS];
+  uint32_t counter_external[NUM_EXTERNAL_COUNTERS];
+  bool counter_external_flag[NUM_COUNTERS];
+  bool snapshot_enable;
+  bool op_in_progress;
+
   bool enable;
   bool resetted = false;
 
@@ -102,6 +114,7 @@ public:
   void config(reg_t rs1, reg_t rs2);
   void compute(reg_t a_addr, reg_t bd_addr, bool preload);
   void compute_cisc();
+  reg_t counter_operation(reg_t rs1);
 
   void loop_ws(reg_t rs1, reg_t rs2);
   void loop_ws_config_bounds(reg_t rs1, reg_t rs2);
@@ -163,6 +176,7 @@ private:
   const unsigned config_repeating_bias_funct = 15;
   const unsigned config_reset_funct          = 16;
   const unsigned compute_cisc_funct          = 17;
+  const unsigned counter_op_funct            = 126;
   //==========================================================================
 
   bool debug;
@@ -204,6 +218,9 @@ private:
 
   acc_scale_t_bits acc_scale_t_to_acc_scale_t_bits(acc_scale_t scale);
   acc_scale_t acc_scale_t_bits_to_acc_scale_t(acc_scale_t_bits bits);
+
+  void counter_increment(unsigned int counter_id);
+  void counter_increment_random();
 };
 
 #endif
