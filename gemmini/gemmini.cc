@@ -13,7 +13,8 @@ void gemmini_state_t::reset()
 {
   enable = true;
   // mode = OS;
-  // act = NONE;
+  // sys_act = NONE;
+  // acc_act = NONE;
   // sys_shift = 0;
   // relu6_shift = 0;
   // output_sp_addr = 0;
@@ -225,7 +226,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
         if (accumulator) { // Apply shift and activation when moving out of accumulator
           acc_t acc_value = gemmini_state.accumulator.at(spad_row).at(spad_col);
           auto shifted = acc_scale(acc_value, gemmini_state.acc_shift);
-          elem_t activated = apply_activation(shifted); // Activation is always applied in either WS/OS mode
+          elem_t activated = apply_activation_acc(shifted); // Activation is always applied in either WS/OS mode
 
           auto const sizeof_output = full ? sizeof(acc_t) : sizeof(elem_t);
 
@@ -295,7 +296,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
               } else if (accumulator) {
                 acc_t acc_value = gemmini_state.accumulator.at(row_addr).at(poch);
                 auto shifted = acc_scale(acc_value, gemmini_state.acc_shift);
-                elem = apply_activation(shifted); // Activation is always applied in either WS/OS mode
+                elem = apply_activation_acc(shifted); // Activation is always applied in either WS/OS mode
               } else {
                 elem = gemmini_state.spad.at(row_addr).at(poch);
               }
@@ -337,7 +338,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
   if ((rs1 & 0b11) == 0) { // rs1[1:0] == 2'b00, config_ex, configure execute pipeline
     gemmini_state_t::Dataflow new_mode;
     gemmini_state_t::Activation new_act;
-    reg_t new_acc_shift, new_sys_shift, new_relu6_shift, new_c_stride, new_a_stride, new_a_transpose, new_b_transpose;
+    reg_t new_sys_shift, new_sys_acc_shift, new_relu6_shift, new_c_stride, new_a_stride, new_a_transpose, new_b_transpose;
 
     auto rs1_2 = (rs1 >> 2) & 0b1; // extract rs1[2], 0 = output stationary, 1 = weight stationary
     if (rs1_2 == 0) {
@@ -357,8 +358,8 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
       assert(false);
     }
 
-    new_acc_shift = (rs1 >> 32) & 0xFFFFFFFF;
     new_sys_shift = (rs2) & 0xFFFFFFFF;
+    new_sys_acc_shift = (rs1 >> 32) & 0xFFFFFFFF;
     new_relu6_shift = (rs2 >> 32) & 0xFFFF;
     new_c_stride = (rs2 >> 48) & 0xFFFF;
     new_a_stride = (rs1 >> 16) & 0xFFFF;
@@ -368,8 +369,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     const bool set_only_strides = (rs1 >> 7) & 0x1;
 
     dprintf("GEMMINI: config_ex - set dataflow mode from %d to %d\n", gemmini_state.mode, new_mode);
-    dprintf("GEMMINI: config_ex - set activation function from %d to %d\n", gemmini_state.act, new_act);
-    dprintf("GEMMINI: config_ex - set acc_shift from %lu to %lu\n", gemmini_state.acc_shift, new_acc_shift);
+    dprintf("GEMMINI: config_ex - set activation function from %d to %d\n", gemmini_state.sys_act, new_act);
     dprintf("GEMMINI: config_ex - set sys_shift from %lu to %lu\n", gemmini_state.sys_shift, new_sys_shift);
     dprintf("GEMMINI: config_ex - set relu6_shift from %lu to %lu\n", gemmini_state.relu6_shift, new_relu6_shift);
 
@@ -379,9 +379,9 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
 
     if (!set_only_strides) {
       gemmini_state.mode = new_mode;
-      gemmini_state.act = new_act;
-      gemmini_state.acc_shift = acc_scale_t_bits_to_acc_scale_t(new_acc_shift);
+      gemmini_state.sys_act = new_act;
       gemmini_state.sys_shift = new_sys_shift;
+      gemmini_state.sys_acc_shift = new_sys_acc_shift;
       gemmini_state.relu6_shift = new_relu6_shift;
       gemmini_state.a_transpose = new_a_transpose;
       gemmini_state.b_transpose = new_b_transpose;
@@ -404,7 +404,24 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
 #endif
   } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
     dprintf("GEMMINI: config_mvout - set store stride from %lu to %lu\n", gemmini_state.store_stride, rs2);
-    gemmini_state.store_stride = rs2;
+    gemmini_state.store_stride = rs2 & 0xFFFFFFFF;
+
+    gemmini_state_t::Activation new_act;
+    auto rs1_3_2 = (rs1 >> 2) & 0b11; // extract rs1[3:2], 0 = no activation, 1 = ReLU, 2 = ReLU6
+    if (rs1_3_2 == 0) {
+      new_act = gemmini_state_t::NONE;
+    } else if (rs1_3_2 == 1) {
+      new_act = gemmini_state_t::RELU;
+    } else if (rs1_3_2 == 2) {
+      new_act = gemmini_state_t::RELU6;
+    } else {
+      assert(false);
+    }
+    gemmini_state.acc_act = new_act;
+
+    auto new_acc_shift = (rs2 >> 32) & 0xFFFFFFFF;
+    gemmini_state.acc_shift = acc_scale_t_bits_to_acc_scale_t(new_acc_shift);
+
     gemmini_state.pool_stride = (rs1 >> 4) & 0x3;
     gemmini_state.pool_size = (rs1 >> 6) & 0x3;
     gemmini_state.pool_upad = (rs1 >> 8) & 0x3;
@@ -567,7 +584,7 @@ void gemmini_t::compute(reg_t a_addr, reg_t bd_addr, bool preload) {
           elem_t shifted = gemmini_state.mode == gemmini_state_t::OS ?
                              sys_shift(value, gemmini_state.sys_shift) :
                              sys_shift(value, 0);
-          elem_t activated = apply_activation(shifted);
+          elem_t activated = apply_activation_sys(shifted);
           gemmini_state.spad.at(base_sp_addr + gemmini_state.c_stride * i).at(j) = activated;
 #ifdef ELEM_T_IS_FLOAT
           dprintf("%f ", gemmini_state.spad.at(base_sp_addr + gemmini_state.c_stride * i).at(j));
@@ -753,7 +770,7 @@ void gemmini_t::compute_cisc() {
       }
       elem_t shifted = acc_scale(value,
                           gemmini_state.acc_shift);
-      elem_t activated = apply_activation(shifted);
+      elem_t activated = apply_activation_acc(shifted);
       C->at(i).at(j) = activated;
     }
   }
@@ -813,6 +830,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool no_pool = rs2 & 1;
   const bool downsample = (rs2 >> 1) & 1;
   const bool input_dilated = (rs2 >> 2) & 1;
+  const bool activation = (rs2 >> 3) & 3;
 
   const uint16_t batch_size = gemmini_state.loop_conv_ws_batch_size;
   const uint16_t in_dim = gemmini_state.loop_conv_ws_in_dim;
@@ -1195,7 +1213,9 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
           }
         }
   } else if (output != 0 && !no_pool) {
-    // gemmini_extended_config_st(out_channels * sizeof(elem_t), pool_stride, pool_size, pool_out_dim, porows, pocols, orows, ocols, pupad, plpad);
+    auto acc_scale = gemmini_state.acc_shift;
+
+    // gemmini_extended2_config_st(out_channels * sizeof(elem_t), act, scale, pool_stride, pool_size, pool_out_dim, porows, pocols, orows, ocols, pupad, plpad);
     config(
       ((uint64_t)ocols << 56) |
       ((uint64_t)orows << 48) |
@@ -1206,8 +1226,10 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
       ((uint64_t)pupad << 8) |
       ((uint64_t)pool_size << 6) |
       ((uint64_t)pool_stride << 4) |
+      (activation << 2) |
       2,
-      out_channels * sizeof(elem_t));
+      ((uint64_t)(acc_scale_t_to_acc_scale_t_bits(acc_scale)) << 32) |
+      (out_channels * sizeof(elem_t)));
 
     for (int b = 0; b < batches; b++) {
       for (int poch = 0; poch < pochs; poch += DIM) {
@@ -1220,8 +1242,12 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
       }
     }
 
-    // gemmini_config_st(out_channels * sizeof(elem_t));
-    config(2, out_channels * sizeof(elem_t));
+    // gemmini_extended_config_st(out_channels * sizeof(elem_t), act, scale);
+    config(
+      (activation << 2) |
+      2,
+      ((uint64_t)(acc_scale_t_to_acc_scale_t_bits(acc_scale)) << 32) |
+      out_channels * sizeof(elem_t));
   }
 }
 
@@ -1417,15 +1443,23 @@ acc_scale_t gemmini_t::acc_scale_t_bits_to_acc_scale_t(acc_scale_t_bits bits) {
 
 // Applying activation from PE post-shifted output to scratchpad (for OS dataflow)
 // or from accumulator to DRAM (after shifting, for WS dataflow)
-elem_t gemmini_t::apply_activation(elem_t value) {
-  if (gemmini_state.act == gemmini_state_t::RELU) {
+elem_t gemmini_t::apply_activation(elem_t value, enum gemmini_state_t::Activation act) {
+  if (act == gemmini_state_t::RELU) {
     return value > 0 ? static_cast<elem_t>(value) : static_cast<elem_t>(0);
-  } else if (gemmini_state.act == gemmini_state_t::RELU6) {
+  } else if (act == gemmini_state_t::RELU6) {
     auto positive = value > 0 ? value : static_cast<elem_t>(0);
     return value > (6 << gemmini_state.relu6_shift) ? static_cast<elem_t>(6 << gemmini_state.relu6_shift) : positive;
-  } else if (gemmini_state.act == gemmini_state_t::NONE) {
+  } else if (act == gemmini_state_t::NONE) {
     return static_cast<elem_t>(value);
   } else assert(false);
+}
+
+elem_t gemmini_t::apply_activation_sys(elem_t value) {
+  return apply_activation(value, gemmini_state.sys_act);
+}
+
+elem_t gemmini_t::apply_activation_acc(elem_t value) {
+  return apply_activation(value, gemmini_state.acc_act);
 }
 
 #ifdef HAS_MVIN_SCALE

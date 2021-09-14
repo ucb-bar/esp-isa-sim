@@ -36,7 +36,8 @@ struct gemmini_state_t
   uint16_t preload_cols, preload_rows;
   uint16_t output_cols, output_rows;
   Dataflow mode;
-  Activation act;
+  Activation sys_act;
+  Activation acc_act;
   reg_t sys_shift, relu6_shift;
   reg_t load_strides[LOAD_STATES];
   reg_t store_stride;
@@ -46,6 +47,7 @@ struct gemmini_state_t
   scale_t load_scales[LOAD_STATES];
 #endif
   acc_scale_t acc_shift;
+  acc_scale_t sys_acc_shift;
   uint16_t c_stride;
   uint16_t a_stride;
   uint8_t pool_stride;
@@ -166,7 +168,9 @@ private:
   //==========================================================================
 
   bool debug;
-  elem_t apply_activation(elem_t value);
+  elem_t apply_activation(elem_t value, enum gemmini_state_t::Activation act);
+  elem_t apply_activation_sys(elem_t value);
+  elem_t apply_activation_acc(elem_t value);
 
 #ifdef HAS_MVIN_SCALE
   elem_t mvin_scale(elem_t value, scale_t scale);
