@@ -40,6 +40,7 @@ void gemmini_state_t::reset()
   resetted = true;
 
   // Dummy counter reset
+  snapshot_enable = false;
   op_in_progress = false;
 
   printf("Gemmini extension configured with:\n");
