@@ -39,6 +39,9 @@ void gemmini_state_t::reset()
 
   resetted = true;
 
+  // Dummy counter reset
+  op_in_progress = false;
+
   printf("Gemmini extension configured with:\n");
   printf("    dim = %u\n", DIM);
 }
@@ -790,6 +793,55 @@ void gemmini_t::compute_cisc() {
   }
 }
 
+// Union for counter operation argument extraction
+union counter_op_param {
+  reg_t arg;
+  struct {
+    uint64_t counter_reset:1;
+    uint64_t snapshot_reset:1;
+    uint64_t take_snapshot:1;
+    uint64_t change_config:1;
+    uint64_t counter_index:3;
+    uint64_t padding2:5;
+    uint64_t counter_addr:6;
+    uint64_t padding1:13;
+    uint64_t external_counter:1;
+    uint64_t padding0:32;
+  };
+};
+
+reg_t gemmini_t::counter_operation(reg_t rs1) {
+  counter_op_param decoder;
+  decoder.arg = rs1;
+  
+  if (decoder.counter_reset) {
+    for (size_t i = 0; i < NUM_COUNTERS; i++)
+      gemmini_state.counter_val[i] = 0;
+    gemmini_state.op_in_progress = false;
+  }
+  if (decoder.snapshot_reset) gemmini_state.snapshot_enable = false;
+  if (decoder.take_snapshot) {
+    gemmini_state.snapshot_enable = true;
+    for (size_t i = 0; i < NUM_COUNTERS; i++) {
+      if (gemmini_state.counter_external_flag[i])
+        gemmini_state.counter_snapshot_val[i] = gemmini_state.counter_external[gemmini_state.counter_config[i]];
+      else
+        gemmini_state.counter_snapshot_val[i] = gemmini_state.counter_val[i];
+    }
+  }
+  if (decoder.change_config) {
+    gemmini_state.counter_config[decoder.counter_index] = decoder.counter_addr;
+    gemmini_state.counter_val[decoder.counter_index] = 0;
+    gemmini_state.counter_external_flag[decoder.counter_index] = decoder.external_counter;
+  }
+  if (gemmini_state.snapshot_enable)
+    return gemmini_state.counter_snapshot_val[decoder.counter_index];
+  else if (gemmini_state.counter_external_flag[decoder.counter_index])
+    return gemmini_state.counter_external[gemmini_state.counter_config[decoder.counter_index]];
+  else
+    return gemmini_state.counter_val[decoder.counter_index];
+}
+
 void gemmini_t::loop_ws_config_bounds(reg_t rs1, reg_t rs2) {
   gemmini_state.loop_ws_I = rs2 & 0xFFFF;
   gemmini_state.loop_ws_J = (rs2 >> 16) & 0xFFFF;
@@ -1311,6 +1363,8 @@ reg_t gemmini_t::CUSTOMFN(XCUSTOM_ACC)(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
   if (!gemmini_state.resetted) {
     reset();
   }
+  if (gemmini_state.op_in_progress)
+    counter_increment_random();
 
   if (insn.funct == mvin_funct) {
     mvin(xs1, xs2, 0);
@@ -1354,6 +1408,8 @@ reg_t gemmini_t::CUSTOMFN(XCUSTOM_ACC)(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     loop_conv_ws_config_6(xs1, xs2);
   } else if (insn.funct == loop_conv_ws_funct) {
     loop_conv_ws(xs1, xs2);
+  } else if (insn.funct == counter_op_funct) {
+    return counter_operation(xs1);
   }
   //==========================================================================
   // gemmini-cisc opcodes
@@ -1396,6 +1452,7 @@ reg_t gemmini_t::CUSTOMFN(XCUSTOM_ACC)(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     dprintf("GEMMINI: encountered unknown instruction with funct: %d\n", insn.funct);
     illegal_instruction();
   }
+  gemmini_state.op_in_progress = (insn.funct != flush_funct);
   return 0;
 }
 
@@ -1559,6 +1616,25 @@ acc_t_bits gemmini_t::acc_t_to_acc_t_bits(acc_t x) {
   return un.b;
 }
 #endif
+
+void gemmini_t::counter_increment(unsigned int counter_id) {
+  for (size_t i = 0; i < NUM_COUNTERS; i++) {
+    if (gemmini_state.counter_config[i] == counter_id) {
+      gemmini_state.counter_val[i]++;
+      break;
+    }
+  }
+}
+void gemmini_t::counter_increment_random() {
+  // So basically, once any Gemmini command is executed, the counter will increments every time a Gemmini command got called
+  // until we hit a counter reset
+  for (size_t i = 0; i < NUM_COUNTERS; i++) {
+    gemmini_state.counter_val[i] += rand() & 0x1ff; // So that the increment < 512
+  }
+  for (size_t i = 0; i < NUM_EXTERNAL_COUNTERS; i++) {
+    gemmini_state.counter_external[i] = rand() & 0xf; // So that the increment < 16
+  }
+}
 
 define_custom_func(gemmini_t, "gemmini", gemmini_custom3, custom3)
 
