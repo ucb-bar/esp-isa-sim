@@ -7,8 +7,6 @@ riscv_subproject_deps = \
 
 riscv_install_prog_srcs = \
 
-riscv_CFLAGS = -fPIC
-
 riscv_hdrs = \
 	abstract_device.h \
 	common.h \
@@ -33,6 +31,7 @@ riscv_hdrs = \
 	debug_rom_defines.h \
 	remote_bitbang.h \
 	jtag_dtm.h \
+	csrs.h \
 
 riscv_install_hdrs = mmio_plugin.h
 
@@ -58,6 +57,7 @@ riscv_srcs = \
 	debug_module.cc \
 	remote_bitbang.cc \
 	jtag_dtm.cc \
+	csrs.cc \
 	$(riscv_gen_srcs) \
 
 riscv_test_srcs =
@@ -482,6 +482,7 @@ riscv_insn_ext_v_alu_int = \
 	vasub_vx \
 	vasubu_vx \
 	vcompress_vm \
+	vcpop_m \
 	vdiv_vv \
 	vdiv_vx \
 	vdivu_vv \
@@ -490,6 +491,9 @@ riscv_insn_ext_v_alu_int = \
 	viota_m \
 	vmacc_vv \
 	vmacc_vx \
+	vmadc_vv \
+	vmadc_vx \
+	vmadc_vi \
 	vmadc_vim \
 	vmadc_vvm \
 	vmadc_vxm \
@@ -513,7 +517,8 @@ riscv_insn_ext_v_alu_int = \
 	vmnor_mm \
 	vmor_mm \
 	vmornot_mm \
-	vpopc_m \
+	vmsbc_vv \
+	vmsbc_vx \
 	vmsbc_vvm \
 	vmsbc_vxm \
 	vmsbf_m \
@@ -723,7 +728,7 @@ riscv_insn_ext_v_alu_fp = \
 	vfredmax_vs \
 	vfredmin_vs \
 	vfredosum_vs \
-	vfredsum_vs \
+	vfredusum_vs \
 	vfrec7_v \
 	vfrsub_vf \
 	vfrsqrt7_v \
@@ -760,7 +765,7 @@ riscv_insn_ext_v_alu_fp = \
 	vfwnmsac_vf \
 	vfwnmsac_vv \
 	vfwredosum_vs \
-	vfwredsum_vs \
+	vfwredusum_vs \
 	vfwsub_vf \
 	vfwsub_vv \
 	vfwsub_wf \
@@ -815,7 +820,7 @@ riscv_insn_ext_v_amo = \
 	vamoxorei64_v \
 
 riscv_insn_ext_v_ldst = \
-	vle1_v \
+	vlm_v \
 	vle8_v \
 	vle16_v \
 	vle32_v \
@@ -852,7 +857,7 @@ riscv_insn_ext_v_ldst = \
 	vl2re64_v \
 	vl4re64_v \
 	vl8re64_v \
-	vse1_v \
+	vsm_v \
 	vse8_v \
 	vse16_v \
 	vse32_v \
@@ -1004,7 +1009,6 @@ riscv_insn_ext_p_simd = \
 	clrs16 \
 	clz16 \
 	clo16 \
-	swap16 \
 	smin8 \
 	umin8 \
 	smax8 \
@@ -1262,6 +1266,12 @@ riscv_insn_priv = \
 	sret \
 	wfi \
 
+riscv_insn_svinval = \
+	sfence_w_inval \
+	sfence_inval_ir \
+	sinval_vma \
+	hinval_vvma \
+	hinval_gvma \
 
 riscv_insn_list = \
 	$(riscv_insn_ext_a) \
@@ -1278,6 +1288,7 @@ riscv_insn_list = \
 	$(riscv_insn_ext_h) \
 	$(riscv_insn_ext_p) \
 	$(riscv_insn_priv) \
+	$(riscv_insn_svinval) \
 
 riscv_gen_srcs = \
 	$(addsuffix .cc,$(riscv_insn_list))

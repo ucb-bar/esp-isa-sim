@@ -267,13 +267,9 @@ private:
 #define FRS1 READ_FREG(insn.rs1())
 #define FRS2 READ_FREG(insn.rs2())
 #define FRS3 READ_FREG(insn.rs3())
-#define dirty_mstatus(bits) ({ reg_t dirties = (bits) | (xlen == 64 ? MSTATUS64_SD : MSTATUS32_SD); \
-                               STATE.mstatus |= dirties; \
-                               if (STATE.v) STATE.vsstatus |= dirties; \
-                            })
-#define dirty_fp_state  dirty_mstatus(MSTATUS_FS)
-#define dirty_ext_state dirty_mstatus(MSTATUS_XS)
-#define dirty_vs_state  dirty_mstatus(MSTATUS_VS)
+#define dirty_fp_state  STATE.sstatus->dirty(SSTATUS_FS)
+#define dirty_ext_state STATE.sstatus->dirty(SSTATUS_XS)
+#define dirty_vs_state  STATE.sstatus->dirty(SSTATUS_VS)
 #define DO_WRITE_FREG(reg, value) (STATE.FPR.write(reg, value), dirty_fp_state)
 #define WRITE_FRD(value) WRITE_FREG(insn.rd(), value)
  
@@ -293,12 +289,12 @@ private:
 #define require_novirt() if (unlikely(STATE.v)) throw trap_virtual_instruction(insn.bits())
 #define require_rv64 require(xlen == 64)
 #define require_rv32 require(xlen == 32)
-#define require_extension(s) require(p->supports_extension(s))
-#define require_either_extension(A,B) require(p->supports_extension(A) || p->supports_extension(B));
+#define require_extension(s) require(p->extension_enabled(s))
+#define require_either_extension(A,B) require(p->extension_enabled(A) || p->extension_enabled(B));
 #define require_impl(s) require(p->supports_impl(s))
-#define require_fp require(((STATE.mstatus & MSTATUS_FS) != 0) && ((STATE.v == 0) || ((STATE.vsstatus & SSTATUS_FS) != 0)))
-#define require_accelerator require(((STATE.mstatus & MSTATUS_XS) != 0) && ((STATE.v == 0) || ((STATE.vsstatus & SSTATUS_XS) != 0)))
-#define require_vector_vs require(((STATE.mstatus & MSTATUS_VS) != 0) && ((STATE.v == 0) || ((STATE.vsstatus & SSTATUS_VS) != 0)))
+#define require_fp          require(STATE.sstatus->enabled(SSTATUS_FS))
+#define require_accelerator require(STATE.sstatus->enabled(SSTATUS_XS))
+#define require_vector_vs   require(STATE.sstatus->enabled(SSTATUS_VS))
 #define require_vector(alu) \
   do { \
     require_vector_vs; \
@@ -618,28 +614,6 @@ static inline bool is_aligned(const unsigned val, const unsigned pos)
       require_noover(insn.rd(), P.VU.vflmul * 2, insn.rs1(), P.VU.vflmul); \
     } else {\
       require_noover_widen(insn.rd(), P.VU.vflmul * 2, insn.rs1(), P.VU.vflmul); \
-    } \
-  }
-
-#define VI_CHECK_QSS(is_vs1) \
-  require_vector(true);\
-  p->supports_extension(EXT_ZVQMAC); \
-  require(P.VU.vflmul <= 2); \
-  require(P.VU.vsew * 4 <= P.VU.ELEN); \
-  require_align(insn.rd(), P.VU.vflmul * 4); \
-  require_align(insn.rs2(), P.VU.vflmul); \
-  require_vm; \
-  if (P.VU.vflmul < 1) {\
-    require_noover(insn.rd(), P.VU.vflmul * 4, insn.rs2(), P.VU.vflmul); \
-  } else {\
-    require_noover_widen(insn.rd(), P.VU.vflmul * 4, insn.rs2(), P.VU.vflmul); \
-  } \
-  if (is_vs1) {\
-     require_align(insn.rs1(), P.VU.vflmul); \
-    if (P.VU.vflmul < 1) {\
-      require_noover(insn.rd(), P.VU.vflmul * 4, insn.rs1(), P.VU.vflmul); \
-    } else {\
-      require_noover_widen(insn.rd(), P.VU.vflmul * 4, insn.rs1(), P.VU.vflmul); \
     } \
   }
 
@@ -1367,63 +1341,6 @@ VI_LOOP_END
     break; \
   }
 
-// quad operation loop
-#define VI_VV_LOOP_QUAD(BODY) \
-  VI_CHECK_QSS(true); \
-  VI_LOOP_BASE \
-  if (sew == e8){ \
-    VV_PARAMS(e8); \
-    BODY; \
-  }else if(sew == e16){ \
-    VV_PARAMS(e16); \
-    BODY; \
-  } \
-  VI_LOOP_END
-
-#define VI_VX_LOOP_QUAD(BODY) \
-  VI_CHECK_QSS(false); \
-  VI_LOOP_BASE \
-  if (sew == e8){ \
-    VX_PARAMS(e8); \
-    BODY; \
-  }else if(sew == e16){ \
-    VX_PARAMS(e16); \
-    BODY; \
-  } \
-  VI_LOOP_END
-
-#define VI_QUAD_OP_AND_ASSIGN(var0, var1, var2, op0, op1, sign) \
-  switch(P.VU.vsew) { \
-  case e8: { \
-    sign##32_t vd_w = P.VU.elt<sign##32_t>(rd_num, i); \
-    P.VU.elt<uint32_t>(rd_num, i, true) = \
-      op1((sign##32_t)(sign##8_t)var0 op0 (sign##32_t)(sign##8_t)var1) + var2; \
-    } \
-    break; \
-  default: { \
-    sign##64_t vd_w = P.VU.elt<sign##64_t>(rd_num, i); \
-    P.VU.elt<uint64_t>(rd_num, i, true) = \
-      op1((sign##64_t)(sign##16_t)var0 op0 (sign##64_t)(sign##16_t)var1) + var2; \
-    } \
-    break; \
-  }
-
-#define VI_QUAD_OP_AND_ASSIGN_MIX(var0, var1, var2, op0, op1, sign_d, sign_1, sign_2) \
-  switch(P.VU.vsew) { \
-  case e8: { \
-    sign_d##32_t vd_w = P.VU.elt<sign_d##32_t>(rd_num, i); \
-    P.VU.elt<uint32_t>(rd_num, i, true) = \
-      op1((sign_1##32_t)(sign_1##8_t)var0 op0 (sign_2##32_t)(sign_2##8_t)var1) + var2; \
-    } \
-    break; \
-  default: { \
-    sign_d##64_t vd_w = P.VU.elt<sign_d##64_t>(rd_num, i); \
-    P.VU.elt<uint64_t>(rd_num, i, true) = \
-      op1((sign_1##64_t)(sign_1##16_t)var0 op0 (sign_2##64_t)(sign_2##16_t)var1) + var2; \
-    } \
-    break; \
-  }
-
 // wide reduction loop - signed
 #define VI_LOOP_WIDE_REDUCTION_BASE(sew1, sew2) \
   reg_t vl = P.VU.vl; \
@@ -1970,9 +1887,9 @@ for (reg_t i = 0; i < P.VU.vlmax && P.VU.vl != 0; ++i) { \
 //
 #define VI_VFP_COMMON \
   require_fp; \
-  require((P.VU.vsew == e16 && p->supports_extension(EXT_ZFH)) || \
-          (P.VU.vsew == e32 && p->supports_extension('F')) || \
-          (P.VU.vsew == e64 && p->supports_extension('D'))); \
+  require((P.VU.vsew == e16 && p->extension_enabled(EXT_ZFH)) || \
+          (P.VU.vsew == e32 && p->extension_enabled('F')) || \
+          (P.VU.vsew == e64 && p->extension_enabled('D'))); \
   require_vector(true);\
   require(STATE.frm < 0x5);\
   reg_t vl = P.VU.vl; \
@@ -2177,8 +2094,8 @@ for (reg_t i = 0; i < P.VU.vlmax && P.VU.vl != 0; ++i) { \
 #define VI_VFP_VV_LOOP_WIDE_REDUCTION(BODY16, BODY32) \
   VI_CHECK_REDUCTION(true) \
   VI_VFP_COMMON \
-  require((P.VU.vsew == e16 && p->supports_extension('F')) || \
-          (P.VU.vsew == e32 && p->supports_extension('D'))); \
+  require((P.VU.vsew == e16 && p->extension_enabled('F')) || \
+          (P.VU.vsew == e32 && p->extension_enabled('D'))); \
   bool is_active = false; \
   switch(P.VU.vsew) { \
     case e16: {\
@@ -2387,9 +2304,9 @@ for (reg_t i = 0; i < P.VU.vlmax && P.VU.vl != 0; ++i) { \
 #define VI_VFP_LOOP_SCALE_BASE \
   require_fp; \
   require_vector(true);\
-  require((P.VU.vsew == e8 && p->supports_extension(EXT_ZFH)) || \
-          (P.VU.vsew == e16 && p->supports_extension('F')) || \
-          (P.VU.vsew == e32 && p->supports_extension('D'))); \
+  require((P.VU.vsew == e8 && p->extension_enabled(EXT_ZFH)) || \
+          (P.VU.vsew == e16 && p->extension_enabled('F')) || \
+          (P.VU.vsew == e32 && p->extension_enabled('D'))); \
   require(STATE.frm < 0x5);\
   reg_t vl = P.VU.vl; \
   reg_t rd_num = insn.rd(); \
@@ -2454,10 +2371,10 @@ for (reg_t i = 0; i < P.VU.vlmax && P.VU.vl != 0; ++i) { \
 #define P_SH(R, INDEX) P_FIELD(R, INDEX, 16)
 #define P_SW(R, INDEX) P_FIELD(R, INDEX, 32)
 
-#define READ_REG_PAIR(reg) \
-  MMU.is_target_big_endian() \
-  ? ((zext32(READ_REG(reg)) << 32) + zext32(READ_REG(reg + 1))) \
-  : ((zext32(READ_REG(reg + 1)) << 32) + zext32(READ_REG(reg)))
+#define READ_REG_PAIR(reg) ({ \
+  require((reg) % 2 == 0); \
+  (reg) == 0 ? reg_t(0) : \
+  (READ_REG((reg) + 1) << 32) + zext32(READ_REG(reg)); })
 
 #define RS1_PAIR READ_REG_PAIR(insn.rs1())
 #define RS2_PAIR READ_REG_PAIR(insn.rs2())
@@ -2467,12 +2384,10 @@ for (reg_t i = 0; i < P.VU.vlmax && P.VU.vl != 0; ++i) { \
   rd_tmp = set_field(rd_tmp, make_mask64((i * sizeof(pd) * 8), sizeof(pd) * 8), pd);
 
 #define WRITE_RD_PAIR(value) \
-  if (MMU.is_target_big_endian()) { \
-    WRITE_REG(insn.rd() + 1, sext32(value)); \
-    WRITE_REG(insn.rd(), ((sreg_t)value) >> 32); \
-  } else { \
+  if (insn.rd() != 0) { \
+    require(insn.rd() % 2 == 0); \
     WRITE_REG(insn.rd(), sext32(value)); \
-    WRITE_REG(insn.rd() + 1, ((sreg_t)value) >> 32); \
+    WRITE_REG(insn.rd() + 1, (sreg_t(value)) >> 32); \
   }
 
 #define P_SET_OV(ov) \

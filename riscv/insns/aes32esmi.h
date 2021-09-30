@@ -2,7 +2,7 @@
 #include "aes_common.h"
 
 require_rv32;
-require_extension('K');
+require_extension(EXT_ZKNE);
 
 uint8_t     bs = insn.bs();
 
@@ -17,5 +17,5 @@ u = (AES_GFMUL(x,3) << 24) |
 
 u = (u << (8*bs)) | (u >> (32-8*bs));
 
-WRITE_RD(u ^ RS1);
+WRITE_RD(sext_xlen(u ^ RS1));
 
