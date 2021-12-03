@@ -412,6 +412,10 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     gemmini_state.load_shrunks[state_id] = (rs1 >> 2) & 1;
 #endif
     gemmini_state.pixels_per_rows[state_id] = (rs1 >> 8) & 0xFF;
+
+#ifndef HAS_FIRST_LAYER_OPTIMIZATIONS
+    assert(gemmini_state.pixels_per_rows[state_id] <= 1, "If Gemmini is built without first-layer optimizations, then 'pixels_per_rows' cannot be larger than 1\n");
+#endif
   } else if ((rs1 & 0b11) == 2) { // rs1[1:0] == 2'b10, config_mvout, configure store pipeline
     dprintf("GEMMINI: config_mvout - set store stride from %lu to %lu\n", gemmini_state.store_stride, rs2);
     gemmini_state.store_stride = rs2 & 0xFFFFFFFF;
@@ -891,6 +895,10 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool downsample = (rs2 >> 1) & 1;
   const bool input_dilated = (rs2 >> 2) & 1;
   const bool activation = (rs2 >> 3) & 3;
+
+#ifndef HAS_FIRST_LAYER_OPTIMIZATIONS
+  assert(max_pixels_per_row <= 1, "If Gemmini is built without first-layer optimizations, then 'max_pixels_per_row' cannot be larger than 1\n");
+#endif
 
   const uint16_t batch_size = gemmini_state.loop_conv_ws_batch_size;
   const uint16_t in_dim = gemmini_state.loop_conv_ws_in_dim;
