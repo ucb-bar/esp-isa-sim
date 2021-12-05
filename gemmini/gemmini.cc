@@ -413,6 +413,9 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
 #endif
     gemmini_state.pixels_per_rows[state_id] = (rs1 >> 8) & 0xFF;
 
+    if (gemmini_state.pixels_per_rows[state_id] == 0)
+      gemmini_state.pixels_per_rows[state_id] = 1;
+
 #ifndef HAS_FIRST_LAYER_OPTIMIZATIONS
     assert(gemmini_state.pixels_per_rows[state_id] <= 1, "If Gemmini is built without first-layer optimizations, then 'pixels_per_rows' cannot be larger than 1\n");
 #endif
@@ -890,11 +893,14 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool trans_weight_1203 = (rs1 >> 3) & 1;
   const bool trans_weight_0132 = (rs1 >> 4) & 1;
   const bool trans_input_3120 = (rs1 >> 5) & 1;
-  const uint8_t max_pixels_per_row = (rs1 >> 8) & 0xFF;
+  uint8_t max_pixels_per_row = (rs1 >> 8) & 0xFF;
   const bool no_pool = rs2 & 1;
   const bool downsample = (rs2 >> 1) & 1;
   const bool input_dilated = (rs2 >> 2) & 1;
   const bool activation = (rs2 >> 3) & 3;
+
+  if (max_pixels_per_row == 0)
+    max_pixels_per_row = 1;
 
 #ifndef HAS_FIRST_LAYER_OPTIMIZATIONS
   assert(max_pixels_per_row <= 1, "If Gemmini is built without first-layer optimizations, then 'max_pixels_per_row' cannot be larger than 1\n");
