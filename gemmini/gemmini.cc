@@ -893,6 +893,7 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
   const bool trans_weight_1203 = (rs1 >> 3) & 1;
   const bool trans_weight_0132 = (rs1 >> 4) & 1;
   const bool trans_input_3120 = (rs1 >> 5) & 1;
+  const bool dw = (rs1 >> 6) & 1;
   uint8_t max_pixels_per_row = (rs1 >> 8) & 0xFF;
   const bool no_pool = rs2 & 1;
   const bool downsample = (rs2 >> 1) & 1;
@@ -1110,7 +1111,9 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
     }
 
     size_t dram_stride = out_channels * sizeof(elem_t);
-    if (trans_weight_1203) {
+    if (dw) {
+      dram_stride = sizeof(elem_t);
+    } else if (trans_weight_1203) {
       dram_stride = kernel_dim * kernel_dim * out_channels * sizeof(elem_t);
     } else if (trans_weight_0132) {
       dram_stride = in_channels * sizeof(elem_t);
@@ -1146,7 +1149,9 @@ void gemmini_t::loop_conv_ws(reg_t rs1, reg_t rs2) {
             }
 
             auto w = weights + ((krow*kernel_dim*in_channels + kcol*in_channels + kch) * out_channels + och)*sizeof(elem_t);
-            if (trans_weight_1203) {
+            if (dw) {
+              w = (weights + krow * kernel_dim + kcol)*sizeof(elem_t);
+            } else if (trans_weight_1203) {
               w = weights + ((kch * kernel_dim * kernel_dim  + krow * kernel_dim + kcol) * out_channels + och)*sizeof(elem_t);
             } else if (trans_weight_0132) {
               w = weights + ((krow * kernel_dim * out_channels + kcol * out_channels + och) * in_channels + kch)*sizeof(elem_t);
