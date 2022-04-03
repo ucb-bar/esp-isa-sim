@@ -30,7 +30,7 @@ static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the
 struct gemmini_state_t
 {
   enum Dataflow {OS, WS};
-  enum Activation {NONE, RELU, RELU6};
+  enum Activation {NONE, RELU, RELU6, IGELU};
   void reset();
 
   // 32-bit gemmini address space
@@ -42,6 +42,7 @@ struct gemmini_state_t
   Activation sys_act;
   Activation acc_act;
   reg_t sys_shift, relu6_shift;
+  int32_t igelu_qb, igelu_qc;
   reg_t load_strides[LOAD_STATES];
   reg_t store_stride;
   uint16_t load_block_strides[LOAD_STATES];
@@ -186,6 +187,7 @@ private:
   elem_t apply_activation(elem_t value, enum gemmini_state_t::Activation act);
   elem_t apply_activation_sys(elem_t value);
   elem_t apply_activation_acc(elem_t value);
+  elem_t apply_igelu(acc_t q, int32_t qb, int32_t qc);
 
 #ifdef HAS_MVIN_SCALE
   elem_t mvin_scale(elem_t value, scale_t scale);

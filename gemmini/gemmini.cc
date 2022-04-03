@@ -234,7 +234,12 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
 
         if (accumulator) { // Apply shift and activation when moving out of accumulator
           acc_t acc_value = gemmini_state.accumulator.at(spad_row).at(spad_col);
-          auto shifted = acc_scale(acc_value, gemmini_state.acc_shift);
+          acc_t gelued = apply_igelu(acc_value, gemmini_state.igelu_qb, gemmini_state.igelu_qc);
+
+          acc_t value_to_scale = gemmini_state.acc_act == gemmini_state_t::IGELU ?
+            gelued : acc_value;
+
+          auto shifted = acc_scale(value_to_scale, gemmini_state.acc_shift);
           elem_t activated = apply_activation_acc(shifted); // Activation is always applied in either WS/OS mode
 
           auto const sizeof_output = full ? sizeof(acc_t) : sizeof(elem_t);
@@ -363,6 +368,8 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
       new_act = gemmini_state_t::RELU;
     } else if (rs1_4_3 == 2) {
       new_act = gemmini_state_t::RELU6;
+    } else if (rs1_4_3 == 3) {
+      new_act = gemmini_state_t::IGELU;
     } else {
       assert(false);
     }
@@ -431,6 +438,8 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
       new_act = gemmini_state_t::RELU;
     } else if (rs1_3_2 == 2) {
       new_act = gemmini_state_t::RELU6;
+    } else if (rs1_3_2 == 3) {
+      new_act = gemmini_state_t::IGELU;
     } else {
       assert(false);
     }
@@ -463,6 +472,9 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
         dprintf("GEMMINI: config_mvout - set pool_ocols to %u\n", gemmini_state.pool_ocols);
         dprintf("GEMMINI: config_mvout - rs1 is %llx\n", rs1);
     }
+  } else if ((rs1 & 0b11) == 3) { // rs1[1:0] == 2'b11, config_bert, configure bert pipeline
+    gemmini_state.igelu_qb = rs1 & 0xFFFFFFFF;
+    gemmini_state.igelu_qc = (rs1 >> 32) & 0xFFFFFFFF;
   }
 }
 
@@ -1539,7 +1551,7 @@ elem_t gemmini_t::apply_activation(elem_t value, enum gemmini_state_t::Activatio
   } else if (act == gemmini_state_t::RELU6) {
     auto positive = value > 0 ? value : static_cast<elem_t>(0);
     return value > (6 << gemmini_state.relu6_shift) ? static_cast<elem_t>(6 << gemmini_state.relu6_shift) : positive;
-  } else if (act == gemmini_state_t::NONE) {
+  } else if (act == gemmini_state_t::NONE || act == gemmini_state_t::IGELU) {
     return static_cast<elem_t>(value);
   } else assert(false);
 }
@@ -1550,6 +1562,15 @@ elem_t gemmini_t::apply_activation_sys(elem_t value) {
 
 elem_t gemmini_t::apply_activation_acc(elem_t value) {
   return apply_activation(value, gemmini_state.acc_act);
+}
+
+elem_t gemmini_t::apply_igelu(acc_t q, int32_t qb, int32_t qc) {
+  const acc_t q_sign = q < 0 ? -1 : 1;
+  const acc_t q_clipped = abs(q) > (-qb) ? (-qb) : abs(q);
+  const acc_t q_poly = (q_clipped + qb)*(q_clipped + qb) + qc;
+  const acc_t q_erf = q_sign * q_poly;
+
+  return q * (q_erf + qc);
 }
 
 #ifdef HAS_MVIN_SCALE
