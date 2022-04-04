@@ -473,8 +473,8 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
         dprintf("GEMMINI: config_mvout - rs1 is %llx\n", rs1);
     }
   } else if ((rs1 & 0b11) == 3) { // rs1[1:0] == 2'b11, config_bert, configure bert pipeline
-    gemmini_state.igelu_qb = rs1 & 0xFFFFFFFF;
-    gemmini_state.igelu_qc = (rs1 >> 32) & 0xFFFFFFFF;
+    gemmini_state.igelu_qb = rs2 & 0xFFFFFFFF;
+    gemmini_state.igelu_qc = (rs2 >> 32) & 0xFFFFFFFF;
   }
 }
 
@@ -1564,7 +1564,7 @@ elem_t gemmini_t::apply_activation_acc(elem_t value) {
   return apply_activation(value, gemmini_state.acc_act);
 }
 
-elem_t gemmini_t::apply_igelu(acc_t q, int32_t qb, int32_t qc) {
+acc_t gemmini_t::apply_igelu(acc_t q, int32_t qb, int32_t qc) {
   const acc_t q_sign = q < 0 ? -1 : 1;
   const acc_t q_clipped = abs(q) > (-qb) ? (-qb) : abs(q);
   const acc_t q_poly = (q_clipped + qb)*(q_clipped + qb) + qc;

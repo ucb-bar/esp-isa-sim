@@ -187,7 +187,7 @@ private:
   elem_t apply_activation(elem_t value, enum gemmini_state_t::Activation act);
   elem_t apply_activation_sys(elem_t value);
   elem_t apply_activation_acc(elem_t value);
-  elem_t apply_igelu(acc_t q, int32_t qb, int32_t qc);
+  acc_t apply_igelu(acc_t q, int32_t qb, int32_t qc);
 
 #ifdef HAS_MVIN_SCALE
   elem_t mvin_scale(elem_t value, scale_t scale);
