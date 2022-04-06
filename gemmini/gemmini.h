@@ -30,7 +30,8 @@ static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the
 struct gemmini_state_t
 {
   enum Dataflow {OS, WS};
-  enum Activation {NONE, RELU, RELU6, IGELU};
+  enum Activation {NONE, RELU, LAYERNORM, IGELU};
+  enum NormCmd {RESET, PASSTHRU, SUM, MEAN, VARIANCE, INV_STDDEV};
   void reset();
 
   // 32-bit gemmini address space
@@ -41,8 +42,8 @@ struct gemmini_state_t
   Dataflow mode;
   Activation sys_act;
   Activation acc_act;
-  reg_t sys_shift, relu6_shift;
-  int32_t igelu_qb, igelu_qc;
+  reg_t sys_shift;
+  acc_t igelu_qb, igelu_qc;
   reg_t load_strides[LOAD_STATES];
   reg_t store_stride;
   uint16_t load_block_strides[LOAD_STATES];
@@ -79,6 +80,13 @@ struct gemmini_state_t
   uint16_t loop_conv_ws_prad, loop_conv_ws_pupad, loop_conv_ws_pdpad, loop_conv_ws_orows;
   uint16_t loop_conv_ws_ocols, loop_conv_ws_kernel_dilation;
   uint64_t loop_conv_ws_input, loop_conv_ws_weights, loop_conv_ws_output, loop_conv_ws_bias;
+
+  // Normalization statistics
+  acc_t norm_sum;
+  acc_t norm_count;
+  acc_t norm_mean;
+  acc_scale_t norm_inv_stddev;
+  bool norm_reset;
 
   // Counter
   uint32_t counter_val[NUM_COUNTERS];
@@ -187,7 +195,10 @@ private:
   elem_t apply_activation(elem_t value, enum gemmini_state_t::Activation act);
   elem_t apply_activation_sys(elem_t value);
   elem_t apply_activation_acc(elem_t value);
-  acc_t apply_igelu(acc_t q, int32_t qb, int32_t qc);
+  acc_t apply_pre_activation_acc(acc_t value);
+  bool apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::NormCmd cmd);
+
+  enum gemmini_state_t::NormCmd non_terminating_norm_cmd(enum gemmini_state_t::NormCmd cmd);
 
 #ifdef HAS_MVIN_SCALE
   elem_t mvin_scale(elem_t value, scale_t scale);

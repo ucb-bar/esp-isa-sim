@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <iostream>
 #include <assert.h>
+#include <math.h>
 
 using namespace std;
 
@@ -16,7 +17,6 @@ void gemmini_state_t::reset()
   // sys_act = NONE;
   // acc_act = NONE;
   // sys_shift = 0;
-  // relu6_shift = 0;
   // output_sp_addr = 0;
   // load_stride = DIM * sizeof(elem_t);
   // store_stride = DIM * sizeof(elem_t);
@@ -37,11 +37,14 @@ void gemmini_state_t::reset()
   m = n = k = 0;
   repeating_bias = false;
 
-  resetted = true;
+  // Norm reset
+  norm_reset = true;
 
   // Dummy counter reset
   snapshot_enable = false;
   op_in_progress = false;
+
+  resetted = true;
 
   printf("Gemmini extension configured with:\n");
   printf("    dim = %u\n", DIM);
@@ -215,17 +218,35 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
 void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   bool const accumulator = (sp_addr >> 31) & 0x1;
   bool const full = (sp_addr >> 29) & 0x1;
-  auto const base_row_addr = (sp_addr & 0x1FFFFFFF); // Strip accumulator addressing bits [31:30]
+  auto const norm_cmd = static_cast<gemmini_state_t::NormCmd>((sp_addr >> 26) & 0x7);
+  auto const base_row_addr = (sp_addr & 0x3FFFFFF); // Strip accumulator addressing bits [31:26]
   auto const cols = (sp_addr >> addr_len) & 0xFFFF;
   auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
-
+  
   const int block_stride = DIM;
 
-  dprintf("GEMMINI: mvout - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, base_row_addr, dram_addr);
+  dprintf("GEMMINI: mvout - 0x%02lx cols and 0x%02lx rows from 0x%08lx to addr 0x%08lx\n", cols, rows, sp_addr, dram_addr);
 
   if (gemmini_state.pool_stride == 0) {
     for (size_t i = 0; i < rows; ++i) {
       auto const dram_row_addr = dram_addr + i*gemmini_state.store_stride;
+
+      bool should_write = true;
+      for (size_t j = 0; j < cols; j += DIM) {
+        const size_t block = j / DIM;
+        const size_t spad_row = base_row_addr + block*block_stride + i;
+        const size_t len = cols - j > DIM ? DIM : cols - j;
+
+        const bool is_last = j + DIM >= cols;
+        const auto n_cmd = is_last ? norm_cmd : non_terminating_norm_cmd(norm_cmd);
+
+        should_write = apply_norm(
+            &gemmini_state.accumulator.at(spad_row).at(0),
+            len, n_cmd);
+      }
+
+      if (!should_write)
+        continue;
 
       for (size_t j = 0; j < cols; ++j) {
         const size_t block = j / DIM;
@@ -234,12 +255,9 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
 
         if (accumulator) { // Apply shift and activation when moving out of accumulator
           acc_t acc_value = gemmini_state.accumulator.at(spad_row).at(spad_col);
-          acc_t gelued = apply_igelu(acc_value, gemmini_state.igelu_qb, gemmini_state.igelu_qc);
+          acc_value = apply_pre_activation_acc(acc_value);
 
-          acc_t value_to_scale = gemmini_state.acc_act == gemmini_state_t::IGELU ?
-            gelued : acc_value;
-
-          auto shifted = acc_scale(value_to_scale, gemmini_state.acc_shift);
+          auto shifted = acc_scale(acc_value, gemmini_state.acc_shift);
           elem_t activated = apply_activation_acc(shifted); // Activation is always applied in either WS/OS mode
 
           auto const sizeof_output = full ? sizeof(acc_t) : sizeof(elem_t);
@@ -262,6 +280,7 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
             dprintf("%d ", activated);
           }
 #endif
+
         } else { // Scratchpad, write to DRAM directly
           auto const dram_byte_addr = dram_row_addr + j*sizeof(elem_t);
           elem_t value = gemmini_state.spad.at(spad_row).at(spad_col);
@@ -277,7 +296,9 @@ void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
       }
       dprintf("\n");
     }
+
   } else {
+
     // Perform pooling
     auto const pool_stride = gemmini_state.pool_stride;
     auto const pool_size = gemmini_state.pool_size;
@@ -352,7 +373,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
   if ((rs1 & 0b11) == 0) { // rs1[1:0] == 2'b00, config_ex, configure execute pipeline
     gemmini_state_t::Dataflow new_mode;
     gemmini_state_t::Activation new_act;
-    reg_t new_sys_shift, new_sys_acc_shift, new_relu6_shift, new_c_stride, new_a_stride, new_a_transpose, new_b_transpose;
+    reg_t new_sys_shift, new_sys_acc_shift, new_c_stride, new_a_stride, new_a_transpose, new_b_transpose;
 
     auto rs1_2 = (rs1 >> 2) & 0b1; // extract rs1[2], 0 = output stationary, 1 = weight stationary
     if (rs1_2 == 0) {
@@ -367,7 +388,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     } else if (rs1_4_3 == 1) {
       new_act = gemmini_state_t::RELU;
     } else if (rs1_4_3 == 2) {
-      new_act = gemmini_state_t::RELU6;
+      new_act = gemmini_state_t::LAYERNORM;
     } else if (rs1_4_3 == 3) {
       new_act = gemmini_state_t::IGELU;
     } else {
@@ -376,7 +397,6 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
 
     new_sys_shift = (rs2) & 0xFFFFFFFF;
     new_sys_acc_shift = (rs1 >> 32) & 0xFFFFFFFF;
-    new_relu6_shift = (rs2 >> 32) & 0xFFFF;
     new_c_stride = (rs2 >> 48) & 0xFFFF;
     new_a_stride = (rs1 >> 16) & 0xFFFF;
     new_a_transpose = (rs1 >> 8) & 0x1;
@@ -387,18 +407,15 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     dprintf("GEMMINI: config_ex - set dataflow mode from %d to %d\n", gemmini_state.mode, new_mode);
     dprintf("GEMMINI: config_ex - set activation function from %d to %d\n", gemmini_state.sys_act, new_act);
     dprintf("GEMMINI: config_ex - set sys_shift from %lu to %lu\n", gemmini_state.sys_shift, new_sys_shift);
-    dprintf("GEMMINI: config_ex - set relu6_shift from %lu to %lu\n", gemmini_state.relu6_shift, new_relu6_shift);
 
     // assert(new_acc_shift >= 0 && new_acc_shift < sizeof(acc_t)*8);
     assert(new_sys_shift >= 0 && new_sys_shift < sizeof(output_t)*8);
-    assert(new_relu6_shift >= 0);
 
     if (!set_only_strides) {
       gemmini_state.mode = new_mode;
       gemmini_state.sys_act = new_act;
       gemmini_state.sys_shift = new_sys_shift;
       gemmini_state.sys_acc_shift = new_sys_acc_shift;
-      gemmini_state.relu6_shift = new_relu6_shift;
       gemmini_state.a_transpose = new_a_transpose;
       gemmini_state.b_transpose = new_b_transpose;
     }
@@ -437,7 +454,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     } else if (rs1_3_2 == 1) {
       new_act = gemmini_state_t::RELU;
     } else if (rs1_3_2 == 2) {
-      new_act = gemmini_state_t::RELU6;
+      new_act = gemmini_state_t::LAYERNORM;
     } else if (rs1_3_2 == 3) {
       new_act = gemmini_state_t::IGELU;
     } else {
@@ -747,14 +764,47 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
 
         // Move-out C
         if (gemmini_state.loop_ws_C != 0 && k == K-1) {
+          const auto act = gemmini_state.acc_act;
           const size_t sizeof_C = full_C ? sizeof(acc_t) : sizeof(elem_t);
-          const uint64_t C_dram_addr = gemmini_state.loop_ws_C +
-              (i*gemmini_state.loop_ws_C_stride + j) * DIM * sizeof_C;
 
-          const uint64_t C_cols = DIM - (j == J - 1 ? pad_J : 0);
-          const uint64_t C_rows = DIM - (i == I - 1 ? pad_I : 0);
+          if (act != gemmini_state_t::LAYERNORM) {
+            const uint64_t C_dram_addr = gemmini_state.loop_ws_C +
+                (i*gemmini_state.loop_ws_C_stride + j) * DIM * sizeof_C;
 
-          mvout(C_dram_addr, (C_rows << 48) | (C_cols << 32) | C_sp_addr);
+            const uint64_t C_cols = DIM - (j == J - 1 ? pad_J : 0);
+            const uint64_t C_rows = DIM - (i == I - 1 ? pad_I : 0);
+
+            mvout(C_dram_addr, (C_rows << 48) | (C_cols << 32) | C_sp_addr);
+          }
+
+          else if (act == gemmini_state_t::LAYERNORM && j == J - 1){
+            uint32_t norm_cmds[][2] = {{2,3},{4,5},{1,0}};
+            const int norm_cmds_size = sizeof(norm_cmds) / sizeof(norm_cmds[0]);
+
+            const size_t rows = DIM - (i == I-1 ? pad_I : 0);
+
+            for (size_t row = 0; row < rows; row++) {
+              for (int cmd = 0; cmd < norm_cmds_size; cmd++) {
+                for (size_t jj = 0; jj < J; jj++) {
+                  uint32_t norm_C_sp_addr = C_sp_addr_start + (i*J + jj)*DIM + row;
+                  if (jj + 1 == J) {
+                    norm_C_sp_addr |= (norm_cmds[cmd][1] << 26); // Final mean/inv-std-dev calculation
+                  } else {
+                    norm_C_sp_addr |= (norm_cmds[cmd][0] << 26); // Accumulate sum/variance
+                  }
+
+                  const uint64_t C_dram_addr = gemmini_state.loop_ws_C +
+                    (i*gemmini_state.loop_ws_C_stride + jj) * DIM * sizeof_C +
+                    row * gemmini_state.loop_ws_C_stride * sizeof_C;
+
+                  const size_t cols = DIM - (jj + 1 == J ? pad_J : 0);
+
+                  // gemmini_extended_mvout(C_dram_addr, norm_C_sp_addr, cols, 1);
+                  mvout(C_dram_addr, ((uint64_t)1 << 48) | (cols << 32) | norm_C_sp_addr);
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -1548,12 +1598,9 @@ acc_scale_t gemmini_t::acc_scale_t_bits_to_acc_scale_t(acc_scale_t_bits bits) {
 elem_t gemmini_t::apply_activation(elem_t value, enum gemmini_state_t::Activation act) {
   if (act == gemmini_state_t::RELU) {
     return value > 0 ? static_cast<elem_t>(value) : static_cast<elem_t>(0);
-  } else if (act == gemmini_state_t::RELU6) {
-    auto positive = value > 0 ? value : static_cast<elem_t>(0);
-    return value > (6 << gemmini_state.relu6_shift) ? static_cast<elem_t>(6 << gemmini_state.relu6_shift) : positive;
-  } else if (act == gemmini_state_t::NONE || act == gemmini_state_t::IGELU) {
+  } else {
     return static_cast<elem_t>(value);
-  } else assert(false);
+  }
 }
 
 elem_t gemmini_t::apply_activation_sys(elem_t value) {
@@ -1564,13 +1611,69 @@ elem_t gemmini_t::apply_activation_acc(elem_t value) {
   return apply_activation(value, gemmini_state.acc_act);
 }
 
-acc_t gemmini_t::apply_igelu(acc_t q, int32_t qb, int32_t qc) {
+acc_t apply_igelu(acc_t q, acc_t qb, acc_t qc) {
   const acc_t q_sign = q < 0 ? -1 : 1;
   const acc_t q_clipped = abs(q) > (-qb) ? (-qb) : abs(q);
   const acc_t q_poly = (q_clipped + qb)*(q_clipped + qb) + qc;
   const acc_t q_erf = q_sign * q_poly;
 
   return q * (q_erf + qc);
+}
+
+acc_t gemmini_t::apply_pre_activation_acc(acc_t value) {
+  if (gemmini_state.acc_act == gemmini_state_t::IGELU) {
+    return apply_igelu(value, gemmini_state.igelu_qb, gemmini_state.igelu_qc);
+  } else if (gemmini_state.acc_act == gemmini_state_t::LAYERNORM) {
+    return (value - gemmini_state.norm_mean) * gemmini_state.norm_inv_stddev;
+  } else {
+    return value;
+  }
+}
+
+bool gemmini_t::apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::NormCmd cmd) {
+  auto& norm_sum = gemmini_state.norm_sum;
+  auto& norm_count = gemmini_state.norm_count;
+  auto& norm_mean = gemmini_state.norm_mean;
+  auto& norm_inv_stddev = gemmini_state.norm_inv_stddev;
+  auto& norm_reset = gemmini_state.norm_reset;
+
+  if (norm_reset) {
+    norm_sum = 0;
+    norm_count = 0;
+  }
+
+  norm_reset = cmd == gemmini_state_t::RESET || cmd == gemmini_state_t::MEAN || cmd == gemmini_state_t::INV_STDDEV;
+
+  if (cmd == gemmini_state_t::SUM || cmd == gemmini_state_t::MEAN) {
+    for (size_t i = 0; i < len; i++)
+      norm_sum += x[i];
+    norm_count += len;
+  } else if (cmd == gemmini_state_t::VARIANCE || cmd == gemmini_state_t::INV_STDDEV) {
+    for (size_t i = 0; i < len; i++)
+      norm_sum += (x[i] - norm_mean)*(x[i] - norm_mean);
+    norm_count += len;
+  }
+
+  if (cmd == gemmini_state_t::MEAN) {
+    norm_mean = norm_sum / norm_count;
+  } else if (cmd == gemmini_state_t::INV_STDDEV) {
+    acc_t variance = norm_sum / norm_count;
+    acc_t norm_stddev = sqrt((double)variance);
+    if (variance == 0) norm_stddev = 1;
+    norm_inv_stddev = (acc_scale_t)1.0 / (acc_scale_t)norm_stddev;
+  }
+
+  return cmd == gemmini_state_t::RESET || cmd == gemmini_state_t::PASSTHRU;
+}
+
+enum gemmini_state_t::NormCmd gemmini_t::non_terminating_norm_cmd(enum gemmini_state_t::NormCmd cmd) {
+  if (cmd == gemmini_state_t::RESET)
+    cmd = gemmini_state_t::PASSTHRU;
+  else if (cmd == gemmini_state_t::MEAN)
+    cmd = gemmini_state_t::SUM;
+  else if (cmd == gemmini_state_t::INV_STDDEV)
+    cmd = gemmini_state_t::VARIANCE;
+  return cmd;
 }
 
 #ifdef HAS_MVIN_SCALE
