@@ -38,7 +38,7 @@ void gemmini_state_t::reset()
   repeating_bias = false;
 
   // Norm reset
-  norm_reset = true;
+  for (int i = 0; i < NORM_STAT_IDS; i++) norm_reset[i] = true;
 
   // Dummy counter reset
   snapshot_enable = false;
@@ -490,6 +490,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
         dprintf("GEMMINI: config_mvout - rs1 is %llx\n", rs1);
     }
   } else if ((rs1 & 0b11) == 3) { // rs1[1:0] == 2'b11, config_bert, configure bert pipeline
+    gemmini_state.norm_stat_id = (rs1 >> 8) & 0xFF;
     gemmini_state.igelu_qb = rs2 & 0xFFFFFFFF;
     gemmini_state.igelu_qc = (rs2 >> 32) & 0xFFFFFFFF;
   }
@@ -648,6 +649,7 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
   const bool ex_accumulate = rs1 & 1;
   const bool full_C = (rs1 >> 1) & 1;
   const bool low_D = (rs1 >> 2) & 1;
+  const uint8_t act = (rs1 >> 8) & 0x7;
   const bool a_transpose = rs2 & 1;
   const bool b_transpose = (rs2 >> 1) & 1;
 
@@ -764,7 +766,6 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
 
         // Move-out C
         if (gemmini_state.loop_ws_C != 0 && k == K-1) {
-          const auto act = gemmini_state.acc_act;
           const size_t sizeof_C = full_C ? sizeof(acc_t) : sizeof(elem_t);
 
           if (act != gemmini_state_t::LAYERNORM) {
@@ -778,29 +779,37 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
           }
 
           else if (act == gemmini_state_t::LAYERNORM && j == J - 1){
-            uint32_t norm_cmds[][2] = {{2,3},{4,5},{1,0}};
+            uint32_t norm_cmds[][2] = {{1,2},{3,4},{0,0}};
             const int norm_cmds_size = sizeof(norm_cmds) / sizeof(norm_cmds[0]);
 
             const size_t rows = DIM - (i == I-1 ? pad_I : 0);
 
-            for (size_t row = 0; row < rows; row++) {
+            for (size_t row = 0; row < rows; row += NORM_STAT_IDS) {
+              const size_t stat_ids = rows - row > NORM_STAT_IDS ?
+                NORM_STAT_IDS : rows - row;
+
               for (int cmd = 0; cmd < norm_cmds_size; cmd++) {
-                for (size_t jj = 0; jj < J; jj++) {
-                  uint32_t norm_C_sp_addr = C_sp_addr_start + (i*J + jj)*DIM + row;
-                  if (jj + 1 == J) {
-                    norm_C_sp_addr |= (norm_cmds[cmd][1] << 26); // Final mean/inv-std-dev calculation
-                  } else {
-                    norm_C_sp_addr |= (norm_cmds[cmd][0] << 26); // Accumulate sum/variance
+                for (size_t stat_id = 0; stat_id < stat_ids; stat_id++) {
+                  gemmini_config_bert(stat_id, 0, 0);
+                  const size_t r = row + stat_id;
+
+                  for (size_t jj = 0; jj < J; jj++) {
+                    uint32_t norm_C_sp_addr = C_sp_addr_start + (i*J + jj)*DIM + r;
+                    if (jj + 1 == J) {
+                      norm_C_sp_addr |= (norm_cmds[cmd][1] << 26); // Final mean/inv-std-dev calculation
+                    } else {
+                      norm_C_sp_addr |= (norm_cmds[cmd][0] << 26); // Accumulate sum/variance
+                    }
+
+                    const uint64_t C_dram_addr = gemmini_state.loop_ws_C +
+                      (i*gemmini_state.loop_ws_C_stride + jj) * DIM * sizeof_C +
+                      r * gemmini_state.loop_ws_C_stride * sizeof_C;
+
+                    const size_t cols = DIM - (jj + 1 == J ? pad_J : 0);
+
+                    // gemmini_extended_mvout(C_dram_addr, norm_C_sp_addr, cols, 1);
+                    mvout(C_dram_addr, ((uint64_t)1 << 48) | (cols << 32) | norm_C_sp_addr);
                   }
-
-                  const uint64_t C_dram_addr = gemmini_state.loop_ws_C +
-                    (i*gemmini_state.loop_ws_C_stride + jj) * DIM * sizeof_C +
-                    row * gemmini_state.loop_ws_C_stride * sizeof_C;
-
-                  const size_t cols = DIM - (jj + 1 == J ? pad_J : 0);
-
-                  // gemmini_extended_mvout(C_dram_addr, norm_C_sp_addr, cols, 1);
-                  mvout(C_dram_addr, ((uint64_t)1 << 48) | (cols << 32) | norm_C_sp_addr);
                 }
               }
             }
@@ -1624,18 +1633,25 @@ acc_t gemmini_t::apply_pre_activation_acc(acc_t value) {
   if (gemmini_state.acc_act == gemmini_state_t::IGELU) {
     return apply_igelu(value, gemmini_state.igelu_qb, gemmini_state.igelu_qc);
   } else if (gemmini_state.acc_act == gemmini_state_t::LAYERNORM) {
-    return (value - gemmini_state.norm_mean) * gemmini_state.norm_inv_stddev;
+    const auto stat_id = gemmini_state.norm_stat_id;
+    const auto norm_mean = gemmini_state.norm_mean[stat_id];
+    const auto norm_inv_stddev = gemmini_state.norm_inv_stddev[stat_id];
+    return (value - norm_mean) * norm_inv_stddev;
   } else {
     return value;
   }
 }
 
 bool gemmini_t::apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::NormCmd cmd) {
-  auto& norm_sum = gemmini_state.norm_sum;
-  auto& norm_count = gemmini_state.norm_count;
-  auto& norm_mean = gemmini_state.norm_mean;
-  auto& norm_inv_stddev = gemmini_state.norm_inv_stddev;
-  auto& norm_reset = gemmini_state.norm_reset;
+  // The return value is whether or not the command should write to main memory
+
+  const auto stat_id = gemmini_state.norm_stat_id;
+
+  auto& norm_sum = gemmini_state.norm_sum[stat_id];
+  auto& norm_count = gemmini_state.norm_count[stat_id];
+  auto& norm_mean = gemmini_state.norm_mean[stat_id];
+  auto& norm_inv_stddev = gemmini_state.norm_inv_stddev[stat_id];
+  auto& norm_reset = gemmini_state.norm_reset[stat_id];
 
   if (norm_reset) {
     norm_sum = 0;
@@ -1663,12 +1679,12 @@ bool gemmini_t::apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::No
     norm_inv_stddev = (acc_scale_t)1.0 / (acc_scale_t)norm_stddev;
   }
 
-  return cmd == gemmini_state_t::RESET || cmd == gemmini_state_t::PASSTHRU;
+  return cmd == gemmini_state_t::RESET;
 }
 
 enum gemmini_state_t::NormCmd gemmini_t::non_terminating_norm_cmd(enum gemmini_state_t::NormCmd cmd) {
   if (cmd == gemmini_state_t::RESET)
-    cmd = gemmini_state_t::PASSTHRU;
+    cmd = gemmini_state_t::RESET;
   else if (cmd == gemmini_state_t::MEAN)
     cmd = gemmini_state_t::SUM;
   else if (cmd == gemmini_state_t::INV_STDDEV)

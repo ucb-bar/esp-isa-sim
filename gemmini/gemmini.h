@@ -12,6 +12,7 @@ static const uint32_t sp_matrices = (BANK_NUM * BANK_ROWS) / DIM; // Size the sc
 static const uint32_t accum_rows = ACC_ROWS; // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the scratchpad/accumulator
 #define LOAD_STATES 3
+#define NORM_STAT_IDS 4
 // WARNING: If you change this, you must also change the bits in the counter op config register decoding union in gemmini.cc.
 #define NUM_COUNTERS 8
 #define NUM_EXTERNAL_COUNTERS 6 
@@ -31,7 +32,7 @@ struct gemmini_state_t
 {
   enum Dataflow {OS, WS};
   enum Activation {NONE, RELU, LAYERNORM, IGELU};
-  enum NormCmd {RESET, PASSTHRU, SUM, MEAN, VARIANCE, INV_STDDEV};
+  enum NormCmd {RESET, SUM, MEAN, VARIANCE, INV_STDDEV};
   void reset();
 
   // 32-bit gemmini address space
@@ -82,11 +83,12 @@ struct gemmini_state_t
   uint64_t loop_conv_ws_input, loop_conv_ws_weights, loop_conv_ws_output, loop_conv_ws_bias;
 
   // Normalization statistics
-  acc_t norm_sum;
-  acc_t norm_count;
-  acc_t norm_mean;
-  acc_scale_t norm_inv_stddev;
-  bool norm_reset;
+  uint8_t norm_stat_id;
+  acc_t norm_sum[NORM_STAT_IDS];
+  acc_t norm_count[NORM_STAT_IDS];
+  acc_t norm_mean[NORM_STAT_IDS];
+  acc_scale_t norm_inv_stddev[NORM_STAT_IDS];
+  bool norm_reset[NORM_STAT_IDS];
 
   // Counter
   uint32_t counter_val[NUM_COUNTERS];
