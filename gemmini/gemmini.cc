@@ -790,7 +790,7 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
 
               for (int cmd = 0; cmd < norm_cmds_size; cmd++) {
                 for (size_t stat_id = 0; stat_id < stat_ids; stat_id++) {
-                  gemmini_config_bert(stat_id, 0, 0);
+                  config((stat_id << 8) | 3, 0);
                   const size_t r = row + stat_id;
 
                   for (size_t jj = 0; jj < J; jj++) {
