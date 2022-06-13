@@ -31,8 +31,8 @@ static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the
 struct gemmini_state_t
 {
   enum Dataflow {OS, WS};
-  enum Activation {NONE, RELU, LAYERNORM, IGELU};
-  enum NormCmd {RESET, SUM, MEAN, VARIANCE, INV_STDDEV};
+  enum Activation {NONE, RELU, LAYERNORM, IGELU, SOFTMAX};
+  enum NormCmd {RESET, SUM, MEAN, VARIANCE, INV_STDDEV, MAX, SUM_EXP, INV_SUM_EXP};
   void reset();
 
   // 32-bit gemmini address space
@@ -45,6 +45,7 @@ struct gemmini_state_t
   Activation acc_act;
   reg_t sys_shift;
   acc_t igelu_qb, igelu_qc;
+  acc_t qln2, qln2_inv;
   reg_t load_strides[LOAD_STATES];
   reg_t store_stride;
   uint16_t load_block_strides[LOAD_STATES];
@@ -85,9 +86,12 @@ struct gemmini_state_t
   // Normalization statistics
   uint8_t norm_stat_id;
   acc_t norm_sum[NORM_STAT_IDS];
+  acc_t norm_running_max[NORM_STAT_IDS];
+  acc_t norm_max[NORM_STAT_IDS];
   acc_t norm_count[NORM_STAT_IDS];
   acc_t norm_mean[NORM_STAT_IDS];
   acc_scale_t norm_inv_stddev[NORM_STAT_IDS];
+  acc_scale_t norm_inv_sum_exp[NORM_STAT_IDS];
   bool norm_reset[NORM_STAT_IDS];
 
   // Counter

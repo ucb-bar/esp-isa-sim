@@ -384,7 +384,11 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
 
     auto rs1_4_3 = (rs1 >> 3) & 0b11; // extract rs1[4:3], 0 = no activation, 1 = ReLU, 2 = ReLU6
     if (rs1_4_3 == 0) {
-      new_act = gemmini_state_t::NONE;
+      if (static_cast<int>(gemmini_state.acc_act) != 4) {
+        new_act = gemmini_state_t::NONE;
+      } else {
+        new_act = gemmini_state_t::SOFTMAX;
+      }
     } else if (rs1_4_3 == 1) {
       new_act = gemmini_state_t::RELU;
     } else if (rs1_4_3 == 2) {
@@ -450,7 +454,11 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     gemmini_state_t::Activation new_act;
     auto rs1_3_2 = (rs1 >> 2) & 0b11; // extract rs1[3:2], 0 = no activation, 1 = ReLU, 2 = ReLU6
     if (rs1_3_2 == 0) {
-      new_act = gemmini_state_t::NONE;
+      if (static_cast<int>(gemmini_state.acc_act) != 4) {
+        new_act = gemmini_state_t::NONE;
+      } else {
+        new_act = gemmini_state_t::SOFTMAX;
+      }
     } else if (rs1_3_2 == 1) {
       new_act = gemmini_state_t::RELU;
     } else if (rs1_3_2 == 2) {
@@ -491,8 +499,17 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     }
   } else if ((rs1 & 0b11) == 3) { // rs1[1:0] == 2'b11, config_bert, configure bert pipeline
     gemmini_state.norm_stat_id = (rs1 >> 8) & 0xFF;
-    gemmini_state.igelu_qb = rs2 & 0xFFFFFFFF;
-    gemmini_state.igelu_qc = (rs2 >> 32) & 0xFFFFFFFF;
+    if (!((rs1 >> 17) & 1)) { // set stat_id only
+      gemmini_state.igelu_qb = rs2 & 0xFFFFFFFF;
+      gemmini_state.igelu_qc = (rs2 >> 32) & 0xFFFFFFFF;
+      gemmini_state.acc_act = static_cast<gemmini_state_t::Activation>(0b100 | static_cast<int>(gemmini_state.acc_act));
+      assert(static_cast<int>(gemmini_state.acc_act) <= 4);
+      if ((rs1 >> 18) & 1) { // q const type = 1
+        gemmini_state.qln2_inv = (rs1 >> 32) & 0xFFFFFFFF;
+      } else {
+        gemmini_state.qln2 = (rs1 >> 32) & 0xFFFFFFFF;
+      }
+    }
   }
 }
 
@@ -768,7 +785,7 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
         if (gemmini_state.loop_ws_C != 0 && k == K-1) {
           const size_t sizeof_C = full_C ? sizeof(acc_t) : sizeof(elem_t);
 
-          if (act != gemmini_state_t::LAYERNORM) {
+          if ((act != gemmini_state_t::LAYERNORM) && (act != gemmini_state_t::SOFTMAX)) {
             const uint64_t C_dram_addr = gemmini_state.loop_ws_C +
                 (i*gemmini_state.loop_ws_C_stride + j) * DIM * sizeof_C;
 
@@ -778,9 +795,19 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
             mvout(C_dram_addr, (C_rows << 48) | (C_cols << 32) | C_sp_addr);
           }
 
-          else if (act == gemmini_state_t::LAYERNORM && j == J - 1){
-            uint32_t norm_cmds[][2] = {{1,2},{3,4},{0,0}};
-            const int norm_cmds_size = sizeof(norm_cmds) / sizeof(norm_cmds[0]);
+          else if (((act == gemmini_state_t::LAYERNORM) || (act == gemmini_state_t::SOFTMAX)) && j == J - 1){
+            int norm_cmds_size;
+            uint32_t (*norm_cmds)[2];
+            uint32_t ln_norm_cmds[][2] = {{1,2},{3,4},{0,0}};
+            uint32_t sm_norm_cmds[][2] = {{5,5},{6,7},{0,0}};
+
+            if (act == gemmini_state_t::LAYERNORM) {
+              norm_cmds = ln_norm_cmds;
+              norm_cmds_size = 3;
+            } else {
+              norm_cmds = sm_norm_cmds;
+              norm_cmds_size = 3;
+            }
 
             const size_t rows = DIM - (i == I-1 ? pad_I : 0);
 
@@ -790,7 +817,7 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
 
               for (int cmd = 0; cmd < norm_cmds_size; cmd++) {
                 for (size_t stat_id = 0; stat_id < stat_ids; stat_id++) {
-                  config((stat_id << 8) | 3, 0);
+                  config((1 << 17) | (stat_id << 8) | 3, 0);
                   const size_t r = row + stat_id;
 
                   for (size_t jj = 0; jj < J; jj++) {
@@ -1629,6 +1656,13 @@ acc_t apply_igelu(acc_t q, acc_t qb, acc_t qc) {
   return q * (q_erf + qc);
 }
 
+acc_t apply_iexp(acc_t q, acc_t qb, acc_t qc, acc_t qln2, acc_t qln2_inv) {
+  const acc_t z = (acc_t) (-q * qln2_inv) >> 16;
+  const acc_t qp = q + z * qln2;
+  const acc_t q_exp = (qp + qb) * (qp + qb) + qc;
+  return q_exp >> z;
+}
+
 acc_t gemmini_t::apply_pre_activation_acc(acc_t value) {
   if (gemmini_state.acc_act == gemmini_state_t::IGELU) {
     return apply_igelu(value, gemmini_state.igelu_qb, gemmini_state.igelu_qc);
@@ -1637,6 +1671,12 @@ acc_t gemmini_t::apply_pre_activation_acc(acc_t value) {
     const auto norm_mean = gemmini_state.norm_mean[stat_id];
     const auto norm_inv_stddev = gemmini_state.norm_inv_stddev[stat_id];
     return (value - norm_mean) * norm_inv_stddev;
+  } else if (gemmini_state.acc_act == gemmini_state_t::SOFTMAX) {
+    const auto stat_id = gemmini_state.norm_stat_id;
+    const auto norm_max = gemmini_state.norm_max[stat_id];
+    const auto norm_inv_sum_exp = gemmini_state.norm_inv_sum_exp[stat_id];
+    return acc_scale(apply_iexp(value - norm_max, gemmini_state.igelu_qb, gemmini_state.igelu_qc,
+        gemmini_state.qln2, gemmini_state.qln2_inv), norm_inv_sum_exp);
   } else {
     return value;
   }
@@ -1651,11 +1691,15 @@ bool gemmini_t::apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::No
   auto& norm_count = gemmini_state.norm_count[stat_id];
   auto& norm_mean = gemmini_state.norm_mean[stat_id];
   auto& norm_inv_stddev = gemmini_state.norm_inv_stddev[stat_id];
+  auto& norm_max = gemmini_state.norm_max[stat_id];
+  auto& norm_running_max = gemmini_state.norm_running_max[stat_id];
+  auto& norm_inv_sum_exp = gemmini_state.norm_inv_sum_exp[stat_id];
   auto& norm_reset = gemmini_state.norm_reset[stat_id];
 
   if (norm_reset) {
     norm_sum = 0;
     norm_count = 0;
+    norm_running_max = -2147483648;
   }
 
   norm_reset = cmd == gemmini_state_t::RESET || cmd == gemmini_state_t::MEAN || cmd == gemmini_state_t::INV_STDDEV;
@@ -1668,6 +1712,16 @@ bool gemmini_t::apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::No
     for (size_t i = 0; i < len; i++)
       norm_sum += (x[i] - norm_mean)*(x[i] - norm_mean);
     norm_count += len;
+  } else if (cmd == gemmini_state_t::MAX) {
+    for (size_t i = 0; i < len; i++) {
+      norm_running_max = x[i] > norm_running_max ? x[i] : norm_running_max;
+    }
+  } else if (cmd == gemmini_state_t::SUM_EXP || cmd == gemmini_state_t::INV_SUM_EXP) {
+    norm_max = norm_running_max;
+    for (size_t i = 0; i < len; i++) {
+      norm_sum += apply_iexp(x[i] - norm_max, gemmini_state.igelu_qb, gemmini_state.igelu_qc,
+          gemmini_state.qln2, gemmini_state.qln2_inv);
+    }
   }
 
   if (cmd == gemmini_state_t::MEAN) {
@@ -1677,6 +1731,9 @@ bool gemmini_t::apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::No
     acc_t norm_stddev = sqrt((double)variance);
     if (variance == 0) norm_stddev = 1;
     norm_inv_stddev = (acc_scale_t)1.0 / (acc_scale_t)norm_stddev;
+  } else if (cmd == gemmini_state_t::INV_SUM_EXP) {
+    norm_running_max = -2147483648;
+    norm_inv_sum_exp = ((acc_scale_t) 127.0) / norm_sum;
   }
 
   return cmd == gemmini_state_t::RESET;
@@ -1689,6 +1746,8 @@ enum gemmini_state_t::NormCmd gemmini_t::non_terminating_norm_cmd(enum gemmini_s
     cmd = gemmini_state_t::SUM;
   else if (cmd == gemmini_state_t::INV_STDDEV)
     cmd = gemmini_state_t::VARIANCE;
+  else if (cmd == gemmini_state_t::INV_SUM_EXP)
+    cmd = gemmini_state_t::SUM_EXP;
   return cmd;
 }
 
