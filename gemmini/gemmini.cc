@@ -502,8 +502,11 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     if (!((rs1 >> 17) & 1)) { // set stat_id only
       gemmini_state.igelu_qb = rs2 & 0xFFFFFFFF;
       gemmini_state.igelu_qc = (rs2 >> 32) & 0xFFFFFFFF;
-      gemmini_state.acc_act = static_cast<gemmini_state_t::Activation>(0b100 | static_cast<int>(gemmini_state.acc_act));
+
+      auto act_msb = (rs1 >> 16) & 0x1;
+      gemmini_state.acc_act = static_cast<gemmini_state_t::Activation>((act_msb << 2) | static_cast<int>(gemmini_state.acc_act));
       assert(static_cast<int>(gemmini_state.acc_act) <= 4);
+
       if ((rs1 >> 18) & 1) { // q const type = 1
         gemmini_state.qln2_inv = (rs1 >> 32) & 0xFFFFFFFF;
       } else {
