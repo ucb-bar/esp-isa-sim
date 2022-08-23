@@ -497,7 +497,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
         dprintf("GEMMINI: config_mvout - set pool_ocols to %u\n", gemmini_state.pool_ocols);
         dprintf("GEMMINI: config_mvout - rs1 is %llx\n", rs1);
     }
-  } else if ((rs1 & 0b11) == 3) { // rs1[1:0] == 2'b11, config_bert, configure bert pipeline
+  } else if ((rs1 & 0b11) == 3) { // rs1[1:0] == 2'b11, config_norm, configure norm pipeline
     gemmini_state.norm_stat_id = (rs1 >> 8) & 0xFF;
     if (!((rs1 >> 17) & 1)) { // set stat_id only
       gemmini_state.igelu_qb = rs2 & 0xFFFFFFFF;
