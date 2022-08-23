@@ -12,6 +12,11 @@ static const uint32_t sp_matrices = (BANK_NUM * BANK_ROWS) / DIM; // Size the sc
 static const uint32_t accum_rows = ACC_ROWS; // Number of systolic array rows in the accumulator
 static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the scratchpad/accumulator
 #define LOAD_STATES 3
+
+#ifndef NORM_STAT_IDS
+#define NORM_STAT_IDS 4
+#endif
+
 // WARNING: If you change this, you must also change the bits in the counter op config register decoding union in gemmini.cc.
 #define NUM_COUNTERS 8
 #define NUM_EXTERNAL_COUNTERS 6 
@@ -30,7 +35,8 @@ static const uint64_t addr_len = ADDR_LEN; // Number of bits used to address the
 struct gemmini_state_t
 {
   enum Dataflow {OS, WS};
-  enum Activation {NONE, RELU, RELU6};
+  enum Activation {NONE, RELU, LAYERNORM, IGELU, SOFTMAX};
+  enum NormCmd {RESET, SUM, MEAN, VARIANCE, INV_STDDEV, MAX, SUM_EXP, INV_SUM_EXP};
   void reset();
 
   // 32-bit gemmini address space
@@ -41,7 +47,9 @@ struct gemmini_state_t
   Dataflow mode;
   Activation sys_act;
   Activation acc_act;
-  reg_t sys_shift, relu6_shift;
+  reg_t sys_shift;
+  acc_t igelu_qb, igelu_qc;
+  acc_t qln2, qln2_inv;
   reg_t load_strides[LOAD_STATES];
   reg_t store_stride;
   uint16_t load_block_strides[LOAD_STATES];
@@ -78,6 +86,17 @@ struct gemmini_state_t
   uint16_t loop_conv_ws_prad, loop_conv_ws_pupad, loop_conv_ws_pdpad, loop_conv_ws_orows;
   uint16_t loop_conv_ws_ocols, loop_conv_ws_kernel_dilation;
   uint64_t loop_conv_ws_input, loop_conv_ws_weights, loop_conv_ws_output, loop_conv_ws_bias;
+
+  // Normalization statistics
+  uint8_t norm_stat_id;
+  acc_t norm_sum[NORM_STAT_IDS];
+  acc_t norm_running_max[NORM_STAT_IDS];
+  acc_t norm_max[NORM_STAT_IDS];
+  acc_t norm_count[NORM_STAT_IDS];
+  acc_t norm_mean[NORM_STAT_IDS];
+  acc_scale_t norm_inv_stddev[NORM_STAT_IDS];
+  acc_scale_t norm_inv_sum_exp[NORM_STAT_IDS];
+  bool norm_reset[NORM_STAT_IDS];
 
   // Counter
   uint32_t counter_val[NUM_COUNTERS];
@@ -186,6 +205,10 @@ private:
   elem_t apply_activation(elem_t value, enum gemmini_state_t::Activation act);
   elem_t apply_activation_sys(elem_t value);
   elem_t apply_activation_acc(elem_t value);
+  acc_t apply_pre_activation_acc(acc_t value);
+  bool apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::NormCmd cmd);
+
+  enum gemmini_state_t::NormCmd non_terminating_norm_cmd(enum gemmini_state_t::NormCmd cmd);
 
 #ifdef HAS_MVIN_SCALE
   elem_t mvin_scale(elem_t value, scale_t scale);
