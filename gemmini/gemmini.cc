@@ -1660,10 +1660,18 @@ acc_t apply_igelu(acc_t q, acc_t qb, acc_t qc) {
 }
 
 acc_t apply_iexp(acc_t q, acc_t qb, acc_t qc, acc_t qln2, acc_t qln2_inv) {
+#ifdef ELEM_T_IS_FLOAT
+  const acc_t z = (acc_t) (-q * qln2_inv) / (1 << 16);
+#else
   const acc_t z = (acc_t) (-q * qln2_inv) >> 16;
+#endif
   const acc_t qp = q + z * qln2;
   const acc_t q_exp = (qp + qb) * (qp + qb) + qc;
+#ifdef ELEM_T_IS_FLOAT
+  return q_exp / std::pow(2, z);
+#else
   return q_exp >> z;
+#endif
 }
 
 acc_t gemmini_t::apply_pre_activation_acc(acc_t value) {
