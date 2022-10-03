@@ -93,6 +93,11 @@ struct gemmini_state_t
   acc_scale_t norm_inv_stddev[NORM_STAT_IDS];
   acc_scale_t norm_inv_sum_exp[NORM_STAT_IDS];
   bool norm_reset[NORM_STAT_IDS];
+  acc_t norm_stat_mem_mean[128];
+  acc_scale_t norm_stat_mem_inv_stddev[128];
+  uint8_t norm_stat_addr;
+  bool norm_load_stats;
+  bool norm_store_stats;
 
   // Counter
   uint32_t counter_val[NUM_COUNTERS];

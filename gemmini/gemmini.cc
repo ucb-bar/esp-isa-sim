@@ -499,6 +499,12 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
     }
   } else if ((rs1 & 0b11) == 3) { // rs1[1:0] == 2'b11, config_norm, configure norm pipeline
     gemmini_state.norm_stat_id = (rs1 >> 8) & 0xFF;
+    gemmini_state.norm_load_stats = (rs1 >> 26) & 0x1;
+    gemmini_state.norm_store_stats = (rs1 >> 27) & 0x1;
+    if (gemmini_state.norm_load_stats || gemmini_state.norm_store_stats) {
+      gemmini_state.norm_stat_addr = (rs1 >> 18) & 0xFF;
+    }
+    
     if (!((rs1 >> 17) & 1)) { // set stat_id only
       gemmini_state.igelu_qb = rs2 & 0xFFFFFFFF;
       gemmini_state.igelu_qc = (rs2 >> 32) & 0xFFFFFFFF;
@@ -507,7 +513,7 @@ void gemmini_t::config(reg_t rs1, reg_t rs2) {
       gemmini_state.acc_act = static_cast<gemmini_state_t::Activation>((act_msb << 2) | static_cast<int>(gemmini_state.acc_act));
       assert(static_cast<int>(gemmini_state.acc_act) <= 4);
 
-      if ((rs1 >> 18) & 1) { // q const type = 1
+      if ((rs1 >> 28) & 1) { // q const type = 1
         gemmini_state.qln2_inv = (rs1 >> 32) & 0xFFFFFFFF;
       } else {
         gemmini_state.qln2 = (rs1 >> 32) & 0xFFFFFFFF;
@@ -672,6 +678,8 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
   const uint8_t act = (rs1 >> 8) & 0x7;
   const bool a_transpose = rs2 & 1;
   const bool b_transpose = (rs2 >> 1) & 1;
+  const bool use_approx_norm = (rs2 >> 2) & 1;
+  const uint8_t tile_row_idx = (rs2 >> 8) & 0xff;
 
   const uint16_t I = gemmini_state.loop_ws_I;
   const uint16_t J = gemmini_state.loop_ws_J;
@@ -802,11 +810,17 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
             int norm_cmds_size;
             uint32_t (*norm_cmds)[2];
             uint32_t ln_norm_cmds[][2] = {{1,2},{3,4},{0,0}};
+            uint32_t ln_approx_norm_cmds[][2] = {{0,0}};
             uint32_t sm_norm_cmds[][2] = {{5,5},{6,7},{0,0}};
 
             if (act == gemmini_state_t::LAYERNORM) {
-              norm_cmds = ln_norm_cmds;
-              norm_cmds_size = 3;
+              if (use_approx_norm) {
+                norm_cmds = ln_approx_norm_cmds;
+                norm_cmds_size = 1;
+              } else {
+                norm_cmds = ln_norm_cmds;
+                norm_cmds_size = 3;
+              }
             } else {
               norm_cmds = sm_norm_cmds;
               norm_cmds_size = 3;
@@ -820,8 +834,14 @@ void gemmini_t::loop_ws(reg_t rs1, reg_t rs2) {
 
               for (int cmd = 0; cmd < norm_cmds_size; cmd++) {
                 for (size_t stat_id = 0; stat_id < stat_ids; stat_id++) {
-                  config((1 << 17) | (stat_id << 8) | 3, 0);
                   const size_t r = row + stat_id;
+                  // config norm
+                  if (use_approx_norm) {
+                    config((1 << 26) | (((tile_row_idx + i) * DIM + r) << 18) | (1 << 17) | (stat_id << 8) | 3, 0);
+                  } else {
+                    config((1 << 27) | (((tile_row_idx + i) * DIM + r) << 18) | (1 << 17) | (stat_id << 8) | 3, 0);
+
+                  }
 
                   for (size_t jj = 0; jj < J; jj++) {
                     uint32_t norm_C_sp_addr = C_sp_addr_start + (i*J + jj)*DIM + r;
@@ -1673,7 +1693,7 @@ acc_t gemmini_t::apply_pre_activation_acc(acc_t value) {
     const auto stat_id = gemmini_state.norm_stat_id;
     const auto norm_mean = gemmini_state.norm_mean[stat_id];
     const auto norm_inv_stddev = gemmini_state.norm_inv_stddev[stat_id];
-    return (value - norm_mean) * norm_inv_stddev;
+    return (acc_t) ((value - norm_mean) * norm_inv_stddev);
   } else if (gemmini_state.acc_act == gemmini_state_t::SOFTMAX) {
     const auto stat_id = gemmini_state.norm_stat_id;
     const auto norm_max = gemmini_state.norm_max[stat_id];
@@ -1707,6 +1727,11 @@ bool gemmini_t::apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::No
 
   norm_reset = cmd == gemmini_state_t::RESET || cmd == gemmini_state_t::MEAN || cmd == gemmini_state_t::INV_STDDEV;
 
+  if (gemmini_state.norm_load_stats && cmd == gemmini_state_t::RESET) {
+    norm_mean = gemmini_state.norm_stat_mem_mean[gemmini_state.norm_stat_addr];
+    norm_inv_stddev = gemmini_state.norm_stat_mem_inv_stddev[gemmini_state.norm_stat_addr];
+  }
+
   if (cmd == gemmini_state_t::SUM || cmd == gemmini_state_t::MEAN) {
     for (size_t i = 0; i < len; i++)
       norm_sum += x[i];
@@ -1729,11 +1754,17 @@ bool gemmini_t::apply_norm(const acc_t * x, size_t len, enum gemmini_state_t::No
 
   if (cmd == gemmini_state_t::MEAN) {
     norm_mean = norm_sum / norm_count;
+    if (gemmini_state.norm_store_stats) {
+      gemmini_state.norm_stat_mem_mean[gemmini_state.norm_stat_addr] = norm_mean;
+    }
   } else if (cmd == gemmini_state_t::INV_STDDEV) {
     acc_t variance = norm_sum / norm_count;
     acc_t norm_stddev = sqrt((double)variance);
     if (variance == 0) norm_stddev = 1;
     norm_inv_stddev = (acc_scale_t)1.0 / (acc_scale_t)norm_stddev;
+    if (gemmini_state.norm_store_stats) {
+      gemmini_state.norm_stat_mem_inv_stddev[gemmini_state.norm_stat_addr] = norm_inv_stddev;
+    }
   } else if (cmd == gemmini_state_t::INV_SUM_EXP) {
     norm_running_max = -2147483648;
     norm_inv_sum_exp = ((acc_scale_t) 127.0) / norm_sum;
