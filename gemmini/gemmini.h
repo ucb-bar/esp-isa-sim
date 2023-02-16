@@ -77,6 +77,7 @@ struct gemmini_state_t
   uint16_t loop_ws_pad_I, loop_ws_pad_J, loop_ws_pad_K;
   uint64_t loop_ws_A, loop_ws_B, loop_ws_D, loop_ws_C;
   uint64_t loop_ws_A_stride, loop_ws_B_stride, loop_ws_D_stride, loop_ws_C_stride;
+  uint64_t dram_data_addr, dram_index_addr; // sparse pre-config
   uint16_t loop_conv_ws_batch_size, loop_conv_ws_in_dim, loop_conv_ws_in_channels, loop_conv_ws_out_channels;
   uint16_t loop_conv_ws_out_dim, loop_conv_ws_pool_out_dim, loop_conv_ws_stride, loop_conv_ws_padding;
   uint16_t loop_conv_ws_kernel_dim, loop_conv_ws_pool_size, loop_conv_ws_pool_stride, loop_conv_ws_pool_padding;
@@ -145,6 +146,8 @@ public:
   void loop_ws_config_strides_AB(reg_t rs1, reg_t rs2);
   void loop_ws_config_strides_DC(reg_t rs1, reg_t rs2);
 
+  void mvin_sparse_config(reg_t dram_data_addr, reg_t dram_index_addr);
+  void mvin_sparse_coo(reg_t data, reg_t sp_addr, int state_id);
   void loop_conv_ws(reg_t rs1, reg_t rs2);
   void loop_conv_ws_config_1(reg_t rs1, reg_t rs2);
   void loop_conv_ws_config_2(reg_t rs1, reg_t rs2);
@@ -199,6 +202,11 @@ private:
   const unsigned config_reset_funct          = 16;
   const unsigned compute_cisc_funct          = 17;
   const unsigned counter_op_funct            = 126;
+  //==========================================================================
+  // gemmini-sparse opcodes
+  //==========================================================================
+  const unsigned mvin_sp_config_funct = 18;
+  const unsigned mvin_sp_coo_funct = 19;
   //==========================================================================
 
   bool debug;

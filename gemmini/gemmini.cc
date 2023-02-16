@@ -215,6 +215,143 @@ void gemmini_t::mvin(reg_t dram_addr, reg_t sp_addr, int state_id) {
   }
 }
 
+void gemmini_t::mvin_sparse_config(reg_t dram_data_addr, reg_t dram_index_addr) {
+    printf("configuring sparse mvin(data: 0x%08lx, coo: 0x%08lx)\n", dram_data_addr, dram_index_addr);
+    gemmini_state.dram_data_addr = dram_data_addr;
+    gemmini_state.dram_index_addr = dram_index_addr;
+    printf("\tconfig complete\n");
+}
+
+void gemmini_t::mvin_sparse_coo(reg_t sp_addr, reg_t data, int state_id) {
+  bool const accumulator = (sp_addr >> 31) & 0x1;
+  bool const accumulate = (sp_addr >> 30) & 0x1;
+  auto const base_row_addr = (sp_addr & 0x1FFFFFFF); // Strip accumulator addressing bits [31:29]
+  auto const cols = (sp_addr >> addr_len) & 0xFFFF;
+  auto const rows = (sp_addr >> (addr_len + 16)) & 0xFFFF;
+
+  auto const load_stride = gemmini_state.load_strides[state_id];
+  auto const load_shrunk = gemmini_state.load_shrunks[state_id];
+  auto const load_scale = gemmini_state.load_scales[state_id];
+
+  printf("GEMMINI: mvin - 0x%02lx cols and 0x%02lx rows\n");
+
+  auto const row_start = (data >> 16) & 0xFFFF;
+  auto const row_end = row_start + rows;
+  auto const col_start = data & 0xFFFF;
+  auto const col_end = col_start + cols;
+  auto const array_dim = (data >> 32) & 0xFFFFFFFF;
+
+  reg_t dram_addr_ind = gemmini_state.dram_index_addr;
+  reg_t dram_addr_dat = gemmini_state.dram_data_addr;
+  reg_t dram_addr_ind_max = dram_addr_ind + array_dim*sizeof(ind_t)*2;
+
+  printf("read config: data: 0x%08lx, coo: 0x%08lx \n", dram_addr_dat, dram_addr_ind);
+
+  ind_t next_row = read_from_dram<ind_t>(dram_addr_ind);
+  ind_t next_col = read_from_dram<ind_t>(dram_addr_ind + sizeof(ind_t));
+  //if (accumulator)
+  //      next_col = read_from_dram<ind_t>(dram_addr_ind + sizeof(acc_t));
+  //else  next_col = read_from_dram<ind_t>(dram_addr_ind + sizeof(elem_t));
+
+  printf("elem_t %d, elem_t_bits %d \n", sizeof(elem_t), sizeof(elem_t_bits));
+
+  for (size_t row = row_start; row < row_end; ++row) {
+    //auto const dram_row_addr = dram_addr + row*load_stride;
+
+    for (size_t col = col_start; col < col_end; ++col) {
+      const size_t block = col / DIM;
+      const size_t spad_col = col % DIM;
+      if (accumulator) {
+	    acc_t value = 0;
+	    if ((row == next_row) && (col == next_col)) {
+          // load data
+          if (!load_shrunk) {
+#ifdef ELEM_T_IS_FLOAT
+            value = acc_t_bits_to_acc_t(read_from_dram<acc_t_bits>(dram_addr_dat));
+            dram_addr_dat += sizeof(acc_t_bits);
+#else
+            value = read_from_dram<acc_t>(dram_addr_dat);
+            dram_addr_dat += sizeof(acc_t);
+#endif
+
+#ifdef HAS_MVIN_ACC_SCALE
+            value = mvin_scale_acc(value, load_scale);
+#endif
+          } else {
+#ifdef ELEM_T_IS_FLOAT
+            value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_addr_dat));
+            dram_addr_dat += sizeof(elem_t_bits);
+#else
+            value = read_from_dram<elem_t>(dram_addr_dat);
+            dram_addr_dat += sizeof(elem_t);
+#endif
+
+#ifdef HAS_MVIN_SCALE
+            value = mvin_scale(value, load_scale);
+#endif
+          }
+          // increment pointers
+          dram_addr_ind += sizeof(ind_t)<<1;
+          if (dram_addr_ind == dram_addr_ind_max) {
+              printf("mem access protection\n");
+              next_col = col_end; // prevent accesses beyond end of array
+              next_row = row_end; // 
+          } else {
+            next_row = read_from_dram<ind_t>(dram_addr_ind);
+            next_col = read_from_dram<ind_t>(dram_addr_ind + sizeof(ind_t));
+          }
+        }
+        // write value
+        if (accumulate) {
+          gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) += value;
+        } else {
+          gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col) = value;
+        }
+
+#ifdef ELEM_T_IS_FLOAT
+        dprintf("fvalue=%f ", gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col));
+#else          
+        dprintf("ivalue=%d ", gemmini_state.accumulator.at(base_row_addr + row + block*DIM).at(spad_col));
+#endif
+      } else { // not accumulator
+        elem_t value = 0;
+	    if ((row == next_row) && (col == next_col)) {
+          // load data
+#ifdef ELEM_T_IS_FLOAT
+          value = elem_t_bits_to_elem_t(read_from_dram<elem_t_bits>(dram_addr_dat));
+          dram_addr_dat += sizeof(elem_t_bits);
+#else
+          value = read_from_dram<elem_t>(dram_addr_dat);
+          dram_addr_dat += sizeof(elem_t);
+#endif
+
+#ifdef HAS_MVIN_SCALE
+          value = mvin_scale(value, load_scale);
+#endif
+          // increment pointers
+          dram_addr_ind += sizeof(ind_t)<<1;
+          if (dram_addr_ind == dram_addr_ind_max) {
+              next_col = col_end; // prevent accesses beyond end of array
+              next_row = row_end; // 
+          } else {
+            next_row = read_from_dram<ind_t>(dram_addr_ind);
+            next_col = read_from_dram<ind_t>(dram_addr_ind + sizeof(ind_t));
+          }
+        }
+        // write value
+        gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col) = value;
+
+//#ifdef ELEM_T_IS_FLOAT
+//        dprintf("fvalue=%f \n", gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col));
+//#else 
+//        dprintf("ivalue=%d \n", gemmini_state.spad.at(base_row_addr + row + block*DIM).at(spad_col));
+//#endif
+      }
+    }
+    dprintf("\n");
+  }
+}
+
 void gemmini_t::mvout(reg_t dram_addr, reg_t sp_addr) {
   bool const accumulator = (sp_addr >> 31) & 0x1;
   bool const full = (sp_addr >> 29) & 0x1;
@@ -1506,6 +1643,10 @@ reg_t gemmini_t::CUSTOMFN(XCUSTOM_ACC)(rocc_insn_t insn, reg_t xs1, reg_t xs2) {
     mvin(xs1, xs2, 1);
   } else if (insn.funct == mvin3_funct) {
     mvin(xs1, xs2, 2);
+  } else if (insn.funct == mvin_sp_config_funct) {
+    mvin_sparse_config(xs1, xs2); 
+  } else if (insn.funct == mvin_sp_coo_funct) {
+    mvin_sparse_coo(xs1, xs2, 0); 
   } else if (insn.funct == mvout_funct) {
     mvout(xs1, xs2);
   } else if (insn.funct == preload_funct) {
@@ -1779,7 +1920,8 @@ elem_t gemmini_t::mvin_scale(elem_t value, scale_t scale) {
 
 #ifdef HAS_MVIN_ACC_SCALE
 acc_t gemmini_t::mvin_scale_acc(acc_t value, scale_acc_t scale) {
-  acc_t scaled = MVIN_SCALE_ACC(value, scale);
+  acc_t scaled = ACC_SCALE(value, scale);
+  /*MVIN_SCALE_ACC(value, scale);*/
 
 #ifndef ELEM_T_IS_FLOAT
   // Saturate and cast element
